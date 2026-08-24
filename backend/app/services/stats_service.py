@@ -8,8 +8,8 @@ from app.services.common import knowledge_out, project_out
 
 def get_dashboard_stats(conn: sqlite3.Connection) -> dict:
     # "today" = since local midnight, converted to a UTC cutoff (personal-scale approximation)
-    local_midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    since_utc = (local_midnight - local_midnight.utcoffset()).strftime("%Y-%m-%dT%H:%M:%SZ")
+    local_midnight = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+    since_utc = local_midnight.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     today_count = conn.execute(
         "SELECT COUNT(*) AS c FROM knowledge_items WHERE created_at >= ?", (since_utc,)

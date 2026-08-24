@@ -361,12 +361,15 @@ def handle_request(request: dict):
 
 def main() -> int:
     # Windows console: keep UTF-8 for any stderr output
-    if hasattr(sys.stdout, "reconfigure"):
-        try:
-            sys.stdout.reconfigure(encoding="utf-8")
-            sys.stderr.reconfigure(encoding="utf-8")
-        except Exception:  # noqa: BLE001
-            pass
+    # Force UTF-8 on all stdio. On Windows the default pipe encoding is the
+    # locale ANSI codec (e.g. cp950), which mis-decodes the UTF-8 JSON-RPC a
+    # client such as Claude Code writes and turns CJK text into lone surrogates.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8")
+            except Exception:  # noqa: BLE001
+                pass
     log(f"starting (KB_BASE_URL={_base_url()})")
     for line in sys.stdin:
         line = line.strip()
