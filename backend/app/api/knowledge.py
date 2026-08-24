@@ -117,5 +117,3 @@ def upload_attachment(
         raise HTTPException(415, f"unsupported extension: {exc}")
     except attachment_service.AttachmentError as exc:
         raise HTTPException(400, str(exc))
-
-
