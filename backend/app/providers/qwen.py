@@ -50,13 +50,19 @@ class QwenProvider(LLMProvider):
         except (ValueError, KeyError, IndexError) as exc:
             raise LLMProviderError(f"unexpected response shape: {exc}") from exc
 
+    # Reasoning models (e.g. qwen3.8-27b-local) spend most of max_tokens on
+    # reasoning_content before any answer text; observed 2026-08-24 that a
+    # 150-token budget left content="" for tags. 512 covers observed
+    # reasoning overhead plus the answer with headroom.
+    LLM_MAX_TOKENS = 512
+
     def summarize(self, title: str, content: str) -> str:
         body = f"标题: {title}\n内容: {content}"[:6000]
         prompt = (
             "用中文把下面这条个人知识压缩成 1-2 句摘要，"
             "只输出摘要本身，不要解释。\n\n" + body
         )
-        return self.chat(prompt, max_tokens=200)
+        return self.chat(prompt, max_tokens=self.LLM_MAX_TOKENS)
 
     def suggest_tags(self, title: str, content: str) -> List[str]:
         body = f"标题: {title}\n内容: {content}"[:6000]
@@ -64,7 +70,7 @@ class QwenProvider(LLMProvider):
             "为下面这条个人知识推荐 3-5 个简短标签（中文或英文，每个不超过 12 字符）。"
             '严格输出 JSON 数组，例如 ["a","b"]，不要其他文字。\n\n' + body
         )
-        raw = self.chat(prompt, max_tokens=150)
+        raw = self.chat(prompt, max_tokens=self.LLM_MAX_TOKENS)
         return self._parse_tags(raw)
 
     @staticmethod
