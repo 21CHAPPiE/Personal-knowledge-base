@@ -1,0 +1,63 @@
+"""Provider abstractions.
+
+The system must work with no LLM/STT configured: Noop implementations give
+honest fallbacks (truncated summary, empty tags, None transcript) and the API
+layer reports which provider produced the result.
+"""
+
+import abc
+from typing import List, Optional
+
+
+class LLMProvider(abc.ABC):
+    name: str = "base"
+
+    @abc.abstractmethod
+    def summarize(self, title: str, content: str) -> str:
+        """Return a short summary for one knowledge item."""
+
+    @abc.abstractmethod
+    def suggest_tags(self, title: str, content: str) -> List[str]:
+        """Return 0-5 suggested tags."""
+
+    def is_configured(self) -> bool:
+        return True
+
+
+class NoopLLMProvider(LLMProvider):
+    """Fallback used when QWEN_* env is absent: never raises, never pretends."""
+
+    name = "noop"
+
+    def summarize(self, title: str, content: str) -> str:
+        text = (content or "").strip() or title.strip()
+        text = " ".join(text.split())
+        return text[:120] + ("…" if len(text) > 120 else "")
+
+    def suggest_tags(self, title: str, content: str) -> List[str]:
+        return []
+
+    def is_configured(self) -> bool:
+        return False
+
+
+class STTProvider(abc.ABC):
+    name: str = "base"
+
+    @abc.abstractmethod
+    def transcribe(self, audio_path: str, mime_type: str) -> Optional[str]:
+        """Transcribe audio; return None when the provider has no result
+        (callers must not invent a transcript)."""
+
+    def is_configured(self) -> bool:
+        return True
+
+
+class NoopSTTProvider(STTProvider):
+    name = "noop"
+
+    def transcribe(self, audio_path: str, mime_type: str) -> Optional[str]:
+        return None
+
+    def is_configured(self) -> bool:
+        return False
