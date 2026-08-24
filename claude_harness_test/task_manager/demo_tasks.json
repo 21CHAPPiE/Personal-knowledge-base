@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "title": "Write project README",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": 2,
+    "title": "Fix login BUG",
+    "status": "completed",
+    "priority": 3
+  },
+  {
+    "id": 3,
+    "title": "Update the docs",
+    "status": "pending",
+    "priority": 2
+  }
+]
