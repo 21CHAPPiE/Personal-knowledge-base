@@ -1,10 +1,12 @@
 """FastAPI application factory for the Personal Knowledge Base backend."""
 
+import hmac
 import tempfile
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import attachments, knowledge, llm, projects, search, stats
@@ -31,6 +33,20 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
         allow_credentials=False,
     )
+
+    # MVP shared-secret auth: no-op when KB_API_TOKEN is unset (local/dev
+    # default), so it never breaks the "usable without config" contract.
+    # /health stays open for uptime checks; CORS preflight is never a real
+    # request so it must pass through untouched.
+    @app.middleware("http")
+    async def require_api_token(request: Request, call_next):
+        settings = get_settings()
+        if settings.api_token and request.method != "OPTIONS" and request.url.path != "/health":
+            expected = f"Bearer {settings.api_token}"
+            provided = request.headers.get("authorization", "")
+            if not hmac.compare_digest(provided, expected):
+                return JSONResponse({"detail": "missing or invalid token"}, status_code=401)
+        return await call_next(request)
 
     app.include_router(projects.router)
     app.include_router(knowledge.router)

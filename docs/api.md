@@ -3,6 +3,12 @@
 后端基础地址默认 `http://127.0.0.1:8000`。除特别说明外，请求/响应均为 JSON（UTF-8）。
 时间格式统一为 UTC `YYYY-MM-DDTHH:MM:SSZ`。
 
+## 鉴权
+
+设置了 `KB_API_TOKEN` 环境变量后，除 `/health` 外所有请求（含 `/uploads/*` 静态文件）
+都必须带 `Authorization: Bearer <token>`，否则 401。未设置该变量时不校验（纯本地开发默认）。
+这是公网暴露前的最低限度共享密钥保护，不是多用户账号系统。
+
 ## 系统
 
 - `GET /health` → `{"status":"ok","db":"ok","uploads":"ok","llm":"<provider>","stt":"<provider>"}`
@@ -60,6 +66,7 @@
 
 ## 错误约定
 
+- 401：设置了 `KB_API_TOKEN` 但请求缺少/错误的 `Authorization: Bearer <token>`
 - 404：项目/条目/附件不存在（`detail` 为字符串）
 - 409：项目重名
 - 413：附件超限（`KB_UPLOAD_MAX_BYTES`）

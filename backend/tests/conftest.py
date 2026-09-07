@@ -22,7 +22,8 @@ def client(tmp_path, monkeypatch):
     """Isolated app instance per test: fresh data dir, no LLM/STT configured."""
     monkeypatch.setenv("KB_DATA_DIR", str(tmp_path / "data"))
     for var in ("QWEN_BASE_URL", "QWEN_API_KEY", "QWEN_MODEL",
-                "STT_BASE_URL", "STT_API_KEY", "STT_MODEL", "KB_UPLOAD_MAX_BYTES"):
+                "STT_BASE_URL", "STT_API_KEY", "STT_MODEL", "KB_UPLOAD_MAX_BYTES",
+                "KB_API_TOKEN"):
         monkeypatch.delenv(var, raising=False)
     from app.main import create_app
 

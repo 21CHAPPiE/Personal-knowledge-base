@@ -35,6 +35,8 @@ class Settings:
         except ValueError:
             self.llm_timeout = 30.0
 
+        self.api_token = os.environ.get("KB_API_TOKEN", "").strip()
+
     @property
     def llm_configured(self) -> bool:
         return bool(self.qwen_base_url and self.qwen_model)
