@@ -55,13 +55,26 @@ function buildGraph(nodes: GraphNode[], links: GraphLink[]) {
     .height(container.value.clientHeight || 560)
 }
 
+const PAGE_SIZE = 100
+const MAX_PAGES = 20 // safety cap: 2000 items is plenty for a personal KB graph
+
+async function listAllKnowledge() {
+  const all = []
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const batch = await listKnowledge({ limit: PAGE_SIZE, offset: page * PAGE_SIZE })
+    all.push(...batch)
+    if (batch.length < PAGE_SIZE) break
+  }
+  return all
+}
+
 async function load() {
   loading.value = true
   errorMsg.value = ''
   try {
     const [projects, items] = await Promise.all([
       listProjects(),
-      listKnowledge({ limit: 500 }),
+      listAllKnowledge(),
     ])
 
     const nodes: GraphNode[] = []
