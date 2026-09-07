@@ -122,8 +122,11 @@ local qwenlocal tokens, which are free and untracked here:
   through a delegated subagent specifically so the number is real.
 
 Encode it as one more tag, alongside the `设备:` tag, in the form
-`cost:<tokens>tok(<model>,<subagent|direct-session>)`, e.g.
-`cost:51688tok(claude-sonnet-5,subagent)` or `cost:unknown(direct-session)`.
+`cost:<tokens>tok(<model>/<subagent|direct-session>)` — **use `/`, never `,`**,
+inside the parens: tags are stored as a comma-joined string, so a `,` inside
+one tag's value silently splits it into two separate tags (confirmed by
+testing this exact convention). E.g. `cost:42537tok(claude-sonnet-5/subagent)`
+or `cost:unknown(direct-session)`.
 
 ## Errors
 
