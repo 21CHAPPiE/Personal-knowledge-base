@@ -75,7 +75,7 @@ cd frontend && npm run typecheck && npm run build
 - `QWEN_BASE_URL` / `QWEN_API_KEY` / `QWEN_MODEL`（OpenAI-compatible `/v1/chat/completions` 前缀）
 - `STT_BASE_URL` / `STT_API_KEY` / `STT_MODEL`（`/audio/transcriptions`）
 - `KB_BASE_URL`（仅 MCP server 用，默认 http://127.0.0.1:8000）
-- `KB_API_TOKEN`（可选，共享密钥鉴权，未配置时不校验；配置后除 `/health` 外所有请求含 `/uploads/*` 都要带 `Authorization: Bearer <token>`；给公网暴露前的最低限度保护，不是多用户账号系统）
+- `KB_API_TOKEN`（可选，共享密钥鉴权，未配置时不校验；配置后除 `/health` 外所有请求含 `/uploads/*` 都要带 `Authorization: Bearer <token>`；给公网暴露前的最低限度保护，不是多用户账号系统。backend 配了这个后，MCP server 也要配同一个值，否则 MCP 调用会 401）
 
 配置在**每次调用时读取**（Settings 工厂，无模块级单例），测试可直接 monkeypatch 环境变量。
 

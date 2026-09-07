@@ -9,6 +9,7 @@ Usage:
     python kb_mcp_server.py
 Environment:
     KB_BASE_URL   backend base URL (default http://127.0.0.1:8000)
+    KB_API_TOKEN  bearer token, only needed if the backend has KB_API_TOKEN set
 
 Claude Code registration:
     claude mcp add kb -- python /path/to/mcp/kb_mcp_server.py
@@ -31,6 +32,10 @@ def _base_url() -> str:
     return os.environ.get("KB_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 
 
+def _api_token() -> str:
+    return os.environ.get("KB_API_TOKEN", "").strip()
+
+
 def log(msg: str) -> None:
     print(f"[kb-mcp] {msg}", file=sys.stderr, flush=True)
 
@@ -44,6 +49,9 @@ def http_request(method: str, path: str, json_body=None,
     """
     url = _base_url() + path
     headers = {}
+    token = _api_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     data = None
     if multipart is not None:
         body, ctype = _encode_multipart(multipart)
