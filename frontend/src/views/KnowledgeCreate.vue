@@ -96,6 +96,22 @@ async function startRecording() {
   }
 }
 
+function pickAudioFile() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'audio/*'
+  input.onchange = () => {
+    const f = input.files?.[0]
+    if (f) {
+      audioBlob.value = f
+      if (audioPreview.value) URL.revokeObjectURL(audioPreview.value)
+      audioPreview.value = URL.createObjectURL(f)
+      if (!title.value) title.value = `语音 ${new Date().toLocaleString('zh-CN', { hour12: false })}`
+    }
+  }
+  input.click()
+}
+
 function clearAudio() {
   audioBlob.value = null
   if (audioPreview.value) URL.revokeObjectURL(audioPreview.value)
@@ -194,14 +210,19 @@ async function submit() {
 
     <div v-if="mode === 'voice'">
       <div v-if="!recorderSupported" class="error-bar">浏览器不支持 MediaRecorder，建议用 Chrome / Edge / 手机浏览器</div>
-      <div style="display:flex;gap:10px;align-items:center;">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
         <button class="btn primary" @click="toggleRecording">
           {{ recording ? '⏹ 停止' : '⏺ 开始录音' }}
         </button>
         <span class="time" style="color:var(--text-dim);font-variant-numeric:tabular-nums;">
           {{ String(Math.floor(seconds / 60)).padStart(2, '0') }}:{{ String(seconds % 60).padStart(2, '0') }}
         </span>
-        <button v-if="audioBlob" class="btn small" @click="clearAudio">重新录制</button>
+        <button class="btn small" @click="pickAudioFile">📁 上传已有录音文件</button>
+        <button v-if="audioBlob" class="btn small" @click="clearAudio">清除</button>
+      </div>
+      <div style="font-size:0.78rem;color:var(--text-faint);margin-top:6px;">
+        在线录音需要 HTTPS（浏览器安全限制），公网明文 http 访问时用不了；这种情况下用手机自带录音
+        App 录好，再点"上传已有录音文件"选择那个文件即可，效果一样。
       </div>
       <audio v-if="audioPreview" :src="audioPreview" controls style="margin-top:10px;" />
       <div style="font-size:0.78rem;color:var(--text-faint);margin-top:8px;">
