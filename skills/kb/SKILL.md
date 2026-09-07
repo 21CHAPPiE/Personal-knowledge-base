@@ -89,9 +89,15 @@ Then:
 
 ## When a progress-log entry is worth writing at all
 
-Use the exact same bar Claude's own cross-session memory uses (see
-`docs/claude-memory.md` for the full writeup of that system) — a note only
-qualifies if it is:
+Two independent triggers, mirroring Claude's own cross-session memory system
+exactly (see `docs/claude-memory.md` for the full writeup):
+
+**Trigger 1 — the user explicitly asks for it.** If the user directly says
+to record/save/log something, just do it — don't run it through the bar
+below first. An explicit request already settles the question.
+
+**Trigger 2 — you judge it worth logging on your own**, using the exact same
+bar Claude's own cross-session memory uses. A note only qualifies if it is:
 
 - **applicable** — it would actually change future behavior or a future
   decision, not just restate ambient status.
