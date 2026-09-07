@@ -10,6 +10,7 @@ import { RouterLink, RouterView } from 'vue-router'
       <RouterLink to="/knowledge">知识</RouterLink>
       <RouterLink to="/projects">项目</RouterLink>
       <RouterLink to="/search">搜索</RouterLink>
+      <RouterLink to="/graph">图谱</RouterLink>
     </nav>
   </div>
   <main class="main">
