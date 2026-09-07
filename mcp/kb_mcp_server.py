@@ -220,6 +220,67 @@ def tool_project_append_context(args: dict):
     return _text(http_request("POST", f"/api/projects/{project['id']}/context/append", json_body=body))
 
 
+def tool_kb_lesson_match(args: dict):
+    params = {"signature": str(args.get("signature") or "")}
+    for key in ("os", "machine", "stack"):
+        if args.get(key):
+            params[key] = str(args[key])
+    if args.get("project"):
+        params["project_id"] = _resolve_project(args["project"])["id"]
+    if args.get("limit") is not None:
+        params["limit"] = args["limit"]
+    qs = urllib.parse.urlencode(params)
+    return _text(http_request("GET", f"/api/lessons/match?{qs}"))
+
+
+def _lesson_body(args: dict) -> str:
+    return (
+        "【触发签名】\n{signature}\n\n"
+        "【根因】\n{root_cause}\n\n"
+        "【解法】\n{resolution}\n\n"
+        "【不适用】\n{not_applicable}\n\n"
+        "【验证】\n{verified}"
+    ).format(
+        signature=str(args.get("signature") or "").strip(),
+        root_cause=str(args.get("root_cause") or "").strip(),
+        resolution=str(args.get("resolution") or "").strip(),
+        not_applicable=str(args.get("not_applicable") or "暂无").strip(),
+        verified=str(args.get("verified") or "未单独验证").strip(),
+    )
+
+
+def tool_kb_lesson_add(args: dict):
+    scope = str(args.get("scope") or "").strip()
+    if scope not in ("machine", "project", "stack", "universal"):
+        return _error("scope must be one of: machine, project, stack, universal")
+
+    tags = ["kind:lesson", f"scope:{scope}"]
+    if args.get("machine"):
+        tags.append("machine:" + str(args["machine"]))
+    elif scope == "machine":
+        return _error("scope=machine requires a machine tag (run scripts/machine_id.py)")
+    if args.get("os"):
+        tags.append("os:" + str(args["os"]))
+    for stack in args.get("stack") or []:
+        tags.append("stack:" + str(stack))
+    for blocked in args.get("not_os") or []:
+        tags.append("not:os:" + str(blocked))
+    # A comma inside a tag value is silently split into two tags server-side.
+    tags = [t.replace(",", "/") for t in tags]
+
+    fields = [
+        ("title", str(args.get("title") or "")[:200]),
+        ("content", _lesson_body(args)),
+        ("type", "project_note"),
+        ("source", "agent"),
+    ]
+    if args.get("project"):
+        fields.append(("project_id", str(_resolve_project(args["project"])["id"])))
+    for tag in tags:
+        fields.append(("tags", tag))
+    return _text(http_request("POST", "/api/knowledge", multipart=fields))
+
+
 TOOLS = [
     {
         "name": "kb_search",
@@ -290,6 +351,54 @@ TOOLS = [
             "required": ["project", "content"],
         },
     },
+    {
+        "name": "kb_lesson_match",
+        "description": (
+            "Check whether this situation has been hit before. Pass the verbatim error string, "
+            "failing command, or symptom as `signature`. Call this BEFORE doing something in a "
+            "category that has burned time before (unfamiliar commands, new service/framework "
+            "setup, systemd/network/permission changes) — not before every action."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "signature": {"type": "string", "description": "verbatim error text / command / symptom"},
+                "os": {"type": "string", "description": "linux|windows|macos — lessons that contradict it are excluded"},
+                "machine": {"type": "string", "description": "output of scripts/machine_id.py, e.g. X99/b3c9c3"},
+                "stack": {"type": "string", "description": "comma-separated, e.g. vite,fastapi"},
+                "project": {"type": "string", "description": "project name or numeric id"},
+                "limit": {"type": "integer", "description": "default 10"},
+            },
+            "required": ["signature"],
+        },
+    },
+    {
+        "name": "kb_lesson_add",
+        "description": (
+            "Record a lesson so it is not re-learned later. Run kb_lesson_match first: if an "
+            "equivalent lesson exists, update that one instead of adding a duplicate. "
+            "Pick `scope` by asking what still holds elsewhere: machine (this box only), "
+            "project (this repo only), stack (any project on this framework), universal."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "signature": {"type": "string", "description": "verbatim error/command/symptom — copy it exactly, do not paraphrase"},
+                "root_cause": {"type": "string", "description": "the mechanism, not the symptom"},
+                "resolution": {"type": "string"},
+                "scope": {"type": "string", "enum": ["machine", "project", "stack", "universal"]},
+                "machine": {"type": "string", "description": "required when scope=machine"},
+                "os": {"type": "string"},
+                "stack": {"type": "array", "items": {"type": "string"}},
+                "not_os": {"type": "array", "items": {"type": "string"}, "description": "OSes this explicitly does NOT apply to"},
+                "not_applicable": {"type": "string"},
+                "verified": {"type": "string"},
+                "project": {"type": "string"},
+            },
+            "required": ["title", "signature", "root_cause", "resolution", "scope"],
+        },
+    },
 ]
 
 TOOL_HANDLERS = {
@@ -297,6 +406,8 @@ TOOL_HANDLERS = {
     "kb_get": tool_kb_get,
     "kb_add": tool_kb_add,
     "kb_recent": tool_kb_recent,
+    "kb_lesson_match": tool_kb_lesson_match,
+    "kb_lesson_add": tool_kb_lesson_add,
     "project_get_context": tool_project_get_context,
     "project_append_context": tool_project_append_context,
 }

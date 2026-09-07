@@ -95,13 +95,14 @@ def test_unknown_method(mcp):
     assert resp["error"]["code"] == -32601
 
 
-def test_tools_list_has_all_six(mcp):
+def test_tools_list_is_complete(mcp):
     resp = mcp.handle_request({"jsonrpc": "2.0", "id": 4, "method": "tools/list"})
     tools = resp["result"]["tools"]
     names = {t["name"] for t in tools}
     assert names == {
         "kb_search", "kb_get", "kb_add", "kb_recent",
         "project_get_context", "project_append_context",
+        "kb_lesson_match", "kb_lesson_add",
     }
     for t in tools:
         assert t["inputSchema"]["type"] == "object"

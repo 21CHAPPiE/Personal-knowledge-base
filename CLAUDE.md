@@ -88,6 +88,8 @@ cd frontend && npm run typecheck && npm run build
 - 前端：TypeScript 严格模式必须过（`npm run typecheck`）；API 封装在 `frontend/src/api/client.ts`
 - 中文文件一律 UTF-8；Windows 控制台注意（MCP server 已强制 stdio UTF-8）
 - FTS 查询词逐词双引号转义（`""` 转义），防止 `AND`/`OR`/`NEAR` 劫持语义
+- tag 值里**不能含英文逗号**（tags 是逗号拼接存储的，含逗号会被静默拆成两个 tag）
+- 教训（lessons）不新建表、不加 `type` 取值——`knowledge_items.type` 有 CHECK 约束且本项目无迁移机制，一律用 `kind:lesson` tag 标识，见 `docs/lessons-system-plan.md`
 
 ## 禁止事项
 
@@ -105,7 +107,7 @@ claude mcp add kb -- python D:/aaa_hydro/Personal-knowledge-base/mcp/kb_mcp_serv
 # 或 .mcp.json: {"mcpServers":{"kb":{"command":"python","args":["<path>/mcp/kb_mcp_server.py"]}}}
 ```
 
-工具：`kb_search(query, project_id?, type?, limit?)`、`kb_get(id)`、`kb_add(title, content, type?, project_id?, tags?, source?)`、`kb_recent(limit?)`、`project_get_context(project)`、`project_append_context(project, content, title?)`。
+工具：`kb_search(query, project_id?, type?, limit?)`、`kb_get(id)`、`kb_add(title, content, type?, project_id?, tags?, source?)`、`kb_recent(limit?)`、`project_get_context(project)`、`project_append_context(project, content, title?)`、`kb_lesson_match(signature, os?, machine?, stack?, project?, limit?)`、`kb_lesson_add(title, signature, root_cause, resolution, scope, …)`。
 `project` 参数可为项目名或数字 id。backend 必须先启动。
 
 ## 当前已完成（2026-08-24）

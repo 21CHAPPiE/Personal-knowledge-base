@@ -51,6 +51,24 @@
 - FTS5（bm25 排序，title 权重 5.0 / tags 2.0 / content 1.0）+ 中文短词 LIKE 回退合并去重；
   查询词经转义，`AND`/`OR`/`NEAR`/括号不会改变语义。
 
+## 教训 `/api/lessons`
+
+- `GET /api/lessons/match?signature=…&os=&machine=&stack=&project_id=&limit=`
+  （`signature` 必填 1-500 字符；`stack` 逗号分隔可传多个；`limit` 默认 10，上限 50）
+
+  只在带 `kind:lesson` tag 的条目里匹配，`signature` 走 FTS5 + 子串双路匹配。
+  返回值是标准知识条目，额外带 `match_score`（整数）与 `match_reasons`（命中原因列表）。
+
+  **排除规则**（命中即整条剔除，而不是降权——错误迁移的教训比没有教训更糟）：
+  条目带 `not:os:<x>` 且请求 `os=<x>`；条目声明了 `os:` 且与请求的不符；
+  条目是 `scope:machine` 且其 `machine:` tag 与请求的 `machine` 不同。
+
+  **加权**：signature 命中 5 分（必要条件）、machine 命中 +3、stack 命中 +2、
+  project_id 相同 +2、`scope:universal` +1。同分按 `updated_at` 倒序。
+
+  教训的写入没有专用端点，就用 `POST /api/knowledge`（`type=project_note` + `kind:lesson` tag）。
+  tag 规范与正文模板见 `docs/lessons-system-plan.md` 与 `skills/kb/SKILL.md`。
+
 ## LLM `/api/llm`
 
 - `GET /api/llm/status` → LLM/STT 配置状态

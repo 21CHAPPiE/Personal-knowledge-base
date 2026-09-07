@@ -134,6 +134,74 @@ one tag's value silently splits it into two separate tags (confirmed by
 testing this exact convention). E.g. `cost:42537tok(claude-sonnet-5/subagent)`
 or `cost:unknown(direct-session)`.
 
+## Lessons — don't re-learn what's already been learned
+
+The KB doubles as a record of problems already solved, so the same mistake
+isn't paid for twice. A lesson is an ordinary knowledge item carrying a
+`kind:lesson` tag; `GET /api/lessons/match` ranks them against your current
+situation. Full design: `docs/lessons-system-plan.md`.
+
+**Before acting — check.** For task categories that have burned time before
+(running an unfamiliar command, standing up a new service or framework,
+touching systemd / networking / permissions / proxies), call it first:
+
+```bash
+curl -s --get "$KB_BASE_URL/api/lessons/match" \
+  -H "Authorization: Bearer $KB_API_TOKEN" \
+  --data-urlencode "signature=<verbatim error text or command>" \
+  --data-urlencode "os=linux" \
+  --data-urlencode "machine=$(python3 scripts/machine_id.py)"
+```
+
+This is **not** a check to run before every action — the token cost would
+exceed the benefit. Run it where repeat failure is actually plausible.
+
+**After solving — record.** When something non-trivial got resolved (took more
+than a round or two), write it down. Post it like any knowledge item
+(multipart, `type=project_note`), with this body:
+
+```
+【触发签名】
+<verbatim error string / failing command / symptom — copy exactly, never paraphrase>
+
+【根因】
+<the mechanism, not a restatement of the symptom>
+
+【解法】
+<what actually worked>
+
+【不适用】
+<where this explicitly does not hold; "暂无" if nothing>
+
+【验证】
+<when and how it was verified>
+```
+
+Verbatim matters: there is no vector search here (no vector DB, by project
+rule), so retrieval leans on exact substrings. "网络有问题" can never be
+matched against; `ImportError: Using SOCKS proxy` can.
+
+**Tags on a lesson** — required: `kind:lesson`, and exactly one
+`scope:machine|project|stack|universal`. Optional: `machine:<hostname>/<uuid6>`
+(from `scripts/machine_id.py`; **required** when `scope:machine`),
+`os:linux|windows|macos`, `stack:<name>` (repeatable), and `not:os:<name>` for
+anti-scope.
+
+**Choosing the scope is the part that matters.** Too narrow and it gets
+re-learned on the next project; too broad and it gets misapplied somewhere it
+was never true, creating a fresh bug. Ask what survives the change of context:
+
+| scope | holds for | example |
+|---|---|---|
+| `machine` | this box only | this machine's `all_proxy=socks5://…` means localhost curl needs `--noproxy '*'` |
+| `project` | this repo only | `GET /api/knowledge` caps `limit` at 100 |
+| `stack` | any project on that framework | Vite behind a tunnel needs `server.allowedHosts` |
+| `universal` | everywhere | browsers block `getUserMedia` outside a secure context |
+
+Before adding, run a match first — if an equivalent lesson exists, `PATCH` that
+one rather than creating a near-duplicate. (Tags replace wholesale on PATCH, so
+re-read the item first.)
+
 ## Errors
 
 - `401 missing or invalid token` — token wrong or stale; delete
