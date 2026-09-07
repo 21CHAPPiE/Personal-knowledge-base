@@ -1,6 +1,6 @@
 # CLAUDE.md — 个人知识库（Personal Knowledge Base）
 
-给后续 agent 会话的项目指引。先读本文件，再按需读 `docs/architecture.md`（架构与数据流）和 `docs/api.md`（完整 API 参考）。
+给后续 agent 会话的项目指引。先读本文件，再按需读 `docs/architecture.md`（架构与数据流）、`docs/api.md`（完整 API 参考）和 `docs/claude-memory.md`（Claude 自身跨会话记忆系统的工作原理，`skills/kb/SKILL.md` 里"何时该写一条进展记录"的标准直接照搬自这套系统）。
 
 ## 项目目标
 

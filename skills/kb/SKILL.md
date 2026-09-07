@@ -87,6 +87,44 @@ Then:
 - Never invent a "location" for an entry. If it matters, state what's
   actually known (which machine/environment produced it), not a guess.
 
+## When a progress-log entry is worth writing at all
+
+Use the exact same bar Claude's own cross-session memory uses (see
+`docs/claude-memory.md` for the full writeup of that system) — a note only
+qualifies if it is:
+
+- **applicable** — it would actually change future behavior or a future
+  decision, not just restate ambient status.
+- **durable** — still true and useful beyond this one sitting, not a
+  todo-list item or something obviously about to change.
+- **legible** — full sentences a reader could pick up cold, one topic per
+  entry, no shorthand or scratchpad prose.
+
+Log: a completed feature/fix, a decision that shapes future work, a newly
+discovered constraint (e.g. "this box only has ~3.6GB VRAM free"), or a
+natural stopping point in a work session. Don't log: routine tool calls,
+half-finished exploration, or anything failing any one of the three tests.
+
+## Cost-tagging a progress-log entry
+
+Every qualifying entry also gets a cost tag — what it cost in *cloud-model*
+tokens (Claude / Codex / DeepSeek / whatever agent did the work), never the
+local qwenlocal tokens, which are free and untracked here:
+
+- If the write was produced by a delegated subagent, use the exact
+  `subagent_tokens` number from that subagent's own completion report — this
+  is precise and always available for delegated work.
+- If the write was done directly in the main session, there is currently no
+  tool that reports that session's own token usage for a specific span of
+  work. **Do not invent a number.** Record it as
+  `cost:unknown(direct-session)` instead of guessing.
+- When an accurate figure actually matters, prefer routing the write itself
+  through a delegated subagent specifically so the number is real.
+
+Encode it as one more tag, alongside the `设备:` tag, in the form
+`cost:<tokens>tok(<model>,<subagent|direct-session>)`, e.g.
+`cost:51688tok(claude-sonnet-5,subagent)` or `cost:unknown(direct-session)`.
+
 ## Errors
 
 - `401 missing or invalid token` — token wrong or stale; delete
