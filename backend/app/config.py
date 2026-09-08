@@ -35,11 +35,19 @@ class Settings:
         except ValueError:
             self.llm_timeout = 30.0
 
+        self.embed_base_url = os.environ.get("EMBED_BASE_URL", "").strip().rstrip("/")
+        self.embed_api_key = os.environ.get("EMBED_API_KEY", "").strip()
+        self.embed_model = os.environ.get("EMBED_MODEL", "").strip()
+
         self.api_token = os.environ.get("KB_API_TOKEN", "").strip()
 
     @property
     def llm_configured(self) -> bool:
         return bool(self.qwen_base_url and self.qwen_model)
+
+    @property
+    def embed_configured(self) -> bool:
+        return bool(self.embed_base_url and self.embed_model)
 
     @property
     def stt_configured(self) -> bool:

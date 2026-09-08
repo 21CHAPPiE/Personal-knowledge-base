@@ -41,6 +41,18 @@ CREATE TABLE IF NOT EXISTS attachments (
 
 CREATE INDEX IF NOT EXISTS idx_attachments_knowledge ON attachments(knowledge_id);
 
+-- Semantic vectors for knowledge items (currently only lessons are embedded).
+-- A brand-new table is safe to add here: CREATE TABLE IF NOT EXISTS does run
+-- against an already-populated database. Only ALTERing an existing table would
+-- need a migration mechanism, which this project does not have.
+CREATE TABLE IF NOT EXISTS knowledge_embeddings (
+    knowledge_id INTEGER PRIMARY KEY REFERENCES knowledge_items(id) ON DELETE CASCADE,
+    model        TEXT NOT NULL,
+    dim          INTEGER NOT NULL,
+    vector       TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
 -- FTS5 external-content index kept in sync with knowledge_items via triggers.
 CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
     title,

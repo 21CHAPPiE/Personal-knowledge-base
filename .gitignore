@@ -8,6 +8,7 @@ __pycache__/
 backend/.testtmp/
 venv/
 .venv/
+.venv*/
 
 # --- Node / Frontend ---
 frontend/node_modules/

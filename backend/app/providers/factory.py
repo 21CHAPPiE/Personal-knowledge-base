@@ -4,7 +4,9 @@ This keeps tests able to monkeypatch QWEN_* / STT_* env vars per test case.
 """
 
 from app.config import get_settings
-from app.providers.base import LLMProvider, NoopLLMProvider, NoopSTTProvider, STTProvider
+from app.providers.base import (EmbeddingProvider, LLMProvider, NoopEmbeddingProvider,
+                                NoopLLMProvider, NoopSTTProvider, STTProvider)
+from app.providers.embedding import OpenAICompatEmbeddingProvider
 from app.providers.qwen import QwenProvider, QwenSTTProvider
 
 
@@ -30,3 +32,15 @@ def get_stt_provider() -> STTProvider:
             timeout=settings.llm_timeout,
         )
     return NoopSTTProvider()
+
+
+def get_embedding_provider() -> EmbeddingProvider:
+    settings = get_settings()
+    if settings.embed_configured:
+        return OpenAICompatEmbeddingProvider(
+            base_url=settings.embed_base_url,
+            api_key=settings.embed_api_key,
+            model=settings.embed_model,
+            timeout=settings.llm_timeout,
+        )
+    return NoopEmbeddingProvider()

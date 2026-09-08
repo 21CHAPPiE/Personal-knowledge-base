@@ -41,6 +41,35 @@ class NoopLLMProvider(LLMProvider):
         return False
 
 
+class EmbeddingProvider(abc.ABC):
+    name: str = "base"
+    dim: int = 0
+
+    @abc.abstractmethod
+    def embed(self, text: str) -> Optional[List[float]]:
+        """Vector for one text, or None when it could not be produced.
+
+        Returning None rather than raising keeps callers writable: a knowledge
+        item must still save when the embedding service is down.
+        """
+
+    def is_configured(self) -> bool:
+        return True
+
+
+class NoopEmbeddingProvider(EmbeddingProvider):
+    """Used when EMBED_* env is absent: the semantic layer simply isn't there,
+    and lesson matching falls back to signature keys alone."""
+
+    name = "noop"
+
+    def embed(self, text: str) -> Optional[List[float]]:
+        return None
+
+    def is_configured(self) -> bool:
+        return False
+
+
 class STTProvider(abc.ABC):
     name: str = "base"
 

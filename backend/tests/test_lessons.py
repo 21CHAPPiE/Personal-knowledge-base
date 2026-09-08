@@ -21,6 +21,27 @@ def match(client, signature, **params):
     return resp.json()
 
 
+def test_noisy_real_world_error_still_matches(client):
+    """The regression this whole matching rewrite exists for.
+
+    Under the original implementation the stored text had to contain the entire
+    query, so a pasted error carrying a hostname/port/PID matched nothing.
+    """
+    add_lesson(client, "SOCKS proxy breaks httpx",
+               "【触发签名】\nsocksio\nUsing SOCKS proxy\n\n【根因】\n环境变量 all_proxy 指向 socks5",
+               ["kind:lesson", "scope:machine", "machine:X99/b3c9c3"])
+
+    for noisy in [
+        "socksio",
+        "ImportError: Using SOCKS proxy, but the 'socksio' package is not installed",
+        "2026-09-07 22:31:04 [worker-7] ImportError: Using SOCKS proxy, but the "
+        "'socksio' package is not installed. host=10.0.0.5 port=8443 pid=91827",
+    ]:
+        assert len(match(client, noisy)) == 1, "should match: {}".format(noisy[:50])
+
+    assert match(client, "Kubernetes operator crashed on node-42") == []
+
+
 def test_signature_hit_and_miss(client):
     add_lesson(client, "SOCKS proxy breaks httpx",
                "【触发签名】\nImportError: Using SOCKS proxy, but the 'socksio' package is not installed",
