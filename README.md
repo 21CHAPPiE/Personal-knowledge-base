@@ -59,6 +59,15 @@ claude mcp add kb -- python path/to/mcp/kb_mcp_server.py
 `KB_BASE_URL` 环境变量可指定 backend 地址；backend 配了 `KB_API_TOKEN` 的话，MCP server 也要配同一个
 `KB_API_TOKEN` 环境变量，否则请求会被 401 拒绝。
 
+## Codex / 其他 agent 接入
+
+`skills/kb/SKILL.md` 是 Claude Code 专有格式，**Codex 不认**——它读的是仓库根目录的
+[`AGENTS.md`](AGENTS.md)，那份文件覆盖了同样的内容并指向具体接口文档。
+
+跨 agent 更可靠的路子是 MCP：`mcp/kb_mcp_server.py` 是标准的 stdio JSON-RPC MCP server
+（零第三方依赖），任何支持 MCP 的客户端都能注册使用，配置时给它 `KB_BASE_URL` 和
+`KB_API_TOKEN` 两个环境变量即可。具体配置语法各家不同，以你所用版本的文档为准。
+
 ## Skill 接入（Claude Code，项目内自动发现，无需注册）
 
 仓库自带一个项目级 Skill：[`skills/kb/SKILL.md`](skills/kb/SKILL.md)。只要 Claude Code 在
