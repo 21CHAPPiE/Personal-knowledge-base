@@ -156,6 +156,12 @@ curl -s --get "$KB_BASE_URL/api/lessons/match" \
 This is **not** a check to run before every action — the token cost would
 exceed the benefit. Run it where repeat failure is actually plausible.
 
+There is also a shell-level backstop: `scripts/kb_shell_hook.sh`, loaded via
+`BASH_ENV`, queries the KB whenever any command exits non-zero and prints a
+matching lesson to stderr without anyone asking. It catches what you forget to
+check, but only sees the failing command text — never its stderr — so a
+deliberate `kb_lesson_match` with the real error message is still sharper.
+
 **After solving — record.** When something non-trivial got resolved (took more
 than a round or two), write it down. Post it like any knowledge item
 (multipart, `type=project_note`), with this body:
