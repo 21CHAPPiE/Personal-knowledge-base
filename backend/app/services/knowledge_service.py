@@ -50,11 +50,36 @@ def create_knowledge(conn: sqlite3.Connection, data: KnowledgeCreate,
     stt_info = None
     if data.type == "voice" and file is not None and not (data.content or "").strip():
         stt_info = _try_transcribe(conn, knowledge_id)
+    _maybe_embed_lesson(conn, knowledge_id, tags)
     row = _item_row(conn, knowledge_id)
     out = knowledge_out(row, attachments=list_attachment_rows(conn, knowledge_id), content_preview=True)
     if stt_info:
         out["stt"] = stt_info
     return out
+
+
+def _maybe_embed_lesson(conn: sqlite3.Connection, knowledge_id: int, tags: str) -> None:
+    """Vectorise a lesson as it is written.
+
+    Without this the two halves of the loop never meet: a lesson recorded
+    through the skill or MCP stays invisible to semantic search until somebody
+    remembers to call /api/lessons/reindex — and remembering is precisely what
+    this system exists to not depend on.
+
+    Never allowed to fail the write. An unavailable embedding service means the
+    lesson is still saved and still keyword-matchable; reindex can fill the
+    vector in later.
+    """
+    from app.services.lesson_service import LESSON_TAG
+
+    if LESSON_TAG not in parse_tags(tags):
+        return
+    try:
+        from app.services.lesson_service import embed_lesson
+
+        embed_lesson(conn, knowledge_id)
+    except Exception:  # noqa: BLE001 - a lost vector must never lose the lesson
+        pass
 
 
 def _try_transcribe(conn: sqlite3.Connection, knowledge_id: int) -> Optional[dict]:
@@ -149,6 +174,9 @@ def update_knowledge(conn: sqlite3.Connection, knowledge_id: int, data: Knowledg
         (title, content, type_, project_id, source, tags, summary, utcnow_iso(), knowledge_id),
     )
     conn.commit()
+    # Re-embed on edit too, or semantic search keeps matching text that is no
+    # longer there — a silently wrong answer rather than a missing one.
+    _maybe_embed_lesson(conn, knowledge_id, tags)
     new_row = _item_row(conn, knowledge_id)
     return knowledge_out(new_row, attachments=list_attachment_rows(conn, knowledge_id))
 

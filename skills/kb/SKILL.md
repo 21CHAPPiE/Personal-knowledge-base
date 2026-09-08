@@ -162,7 +162,8 @@ than a round or two), write it down. Post it like any knowledge item
 
 ```
 【触发签名】
-<verbatim error string / failing command / symptom — copy exactly, never paraphrase>
+<one short distinctive marker per line — e.g. `socksio`, `Invalid Host header`.
+ Copy them out of the real error, never paraphrase.>
 
 【根因】
 <the mechanism, not a restatement of the symptom>
@@ -177,9 +178,25 @@ than a round or two), write it down. Post it like any knowledge item
 <when and how it was verified>
 ```
 
-Verbatim matters: there is no vector search here (no vector DB, by project
-rule), so retrieval leans on exact substrings. "网络有问题" can never be
-matched against; `ImportError: Using SOCKS proxy` can.
+**Every section above is load-bearing for retrieval — this is not a form to
+fill in politely.**
+
+- **触发签名: short markers, one per line, verbatim.** Matching asks whether the
+  incoming error *contains* a stored marker, so a marker must be the stable part
+  of the message with the variable parts (ports, paths, PIDs, timestamps) left
+  out. A whole pasted log line as a single marker matches almost nothing.
+- **根因 and 解法 are scored separately** and the better one wins, because
+  different questions need different halves: "what is this error" is answered by
+  根因, "how do I undo this" by 解法. A lesson with a vague 解法 becomes
+  unfindable to everyone who asks the second way.
+- Writing "网络有问题" as a signature makes the lesson permanently unmatchable;
+  `ImportError: Using SOCKS proxy` is findable forever.
+
+Lessons are vectorised automatically on write and on edit, so there is no
+indexing step to remember. Two endpoints exist for when that is not enough:
+`GET /api/lessons/status` (how many lessons have vectors) and
+`POST /api/lessons/reindex` (backfill lessons written while the embedding
+service was down, or re-embed everything after an embedding model change).
 
 **Tags on a lesson** — required: `kind:lesson`, and exactly one
 `scope:machine|project|stack|universal`. Optional: `machine:<hostname>/<uuid6>`

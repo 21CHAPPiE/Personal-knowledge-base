@@ -147,3 +147,46 @@ def test_rerank_cutoff_is_configurable(monkeypatch):
     assert lesson_service._rerank_cutoff() == -1.5
     monkeypatch.setenv("KB_RERANK_CUTOFF", "not-a-number")
     assert lesson_service._rerank_cutoff() == -0.9
+
+
+def _embedded_count(client):
+    return client.get("/api/lessons/status").json()["embedded"]
+
+
+def test_lesson_is_embedded_on_write_not_only_on_reindex(client, monkeypatch):
+    """The gap that broke the loop: a lesson written through the skill/MCP was
+    invisible to semantic search until someone remembered to call reindex."""
+    calls = []
+    from app.services import knowledge_service
+
+    monkeypatch.setattr(knowledge_service, "_maybe_embed_lesson",
+                        lambda conn, kid, tags: calls.append((kid, tags)))
+
+    add_lesson(client, "a lesson", "【触发签名】\nboom", ["kind:lesson", "scope:universal"])
+    assert len(calls) == 1, "creating a lesson must attempt embedding"
+
+    client.post("/api/knowledge", data={"title": "普通笔记", "content": "x", "type": "text"})
+    assert len(calls) == 2, "the hook runs for every item; it filters on the tag itself"
+
+
+def test_embedding_failure_never_blocks_the_write(client, monkeypatch):
+    from app.services import knowledge_service
+
+    def boom(conn, knowledge_id):
+        raise RuntimeError("embedding service down")
+
+    monkeypatch.setattr("app.services.lesson_service.embed_lesson", boom)
+    kid = add_lesson(client, "still saved", "【触发签名】\nboom",
+                     ["kind:lesson", "scope:universal"])
+    assert client.get("/api/knowledge/{}".format(kid)).status_code == 200
+    assert len(match(client, "boom")) == 1, "keyword matching must still work"
+
+
+def test_editing_a_lesson_re_embeds_it(client, monkeypatch):
+    kid = add_lesson(client, "v1", "【触发签名】\nboom", ["kind:lesson", "scope:universal"])
+
+    calls = []
+    monkeypatch.setattr("app.services.lesson_service.embed_lesson",
+                        lambda conn, knowledge_id: calls.append(knowledge_id) or True)
+    client.patch("/api/knowledge/{}".format(kid), json={"content": "【触发签名】\nbang"})
+    assert calls == [kid], "a stale vector would match text no longer in the lesson"

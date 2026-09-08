@@ -33,6 +33,18 @@ const TYPE_LABELS: Record<string, string> = {
   project_note: '项目笔记',
 }
 
+// Tags that classify an entry rather than relate it to another one. Two lessons
+// both tagged kind:lesson, or both recorded on 设备:X99, have nothing to do with
+// each other — drawing that edge is noise, and since these sit on nearly every
+// entry it is the noise that swamps the graph.
+const CLASSIFICATION_PREFIXES = ['kind:', 'scope:', 'os:', 'not:', 'machine:', 'cost:', '设备:']
+// Even a topical tag stops meaning "related" once it is on everything.
+const MAX_TAG_FANOUT = 12
+
+function isClassificationTag(tag: string): boolean {
+  return CLASSIFICATION_PREFIXES.some((p) => tag.startsWith(p))
+}
+
 const router = useRouter()
 const container = ref<HTMLDivElement | null>(null)
 const loading = ref(true)
@@ -106,6 +118,7 @@ async function load() {
         links.push({ source: `p:${item.project_id}`, target: nodeId })
       }
       for (const tag of item.tags) {
+        if (isClassificationTag(tag)) continue
         const bucket = tagToNodeIds.get(tag) ?? []
         bucket.push(nodeId)
         tagToNodeIds.set(tag, bucket)
@@ -114,6 +127,11 @@ async function load() {
 
     const seen = new Set<string>()
     for (const ids of tagToNodeIds.values()) {
+      // A tag shared by n items would draw n(n-1)/2 edges, so a tag that sits on
+      // everything turns the graph into a mesh: 100 lessons all carrying
+      // kind:lesson is 4,950 edges saying nothing. Classification tags are
+      // filtered out above; only topical tags imply an actual relationship.
+      if (ids.length > MAX_TAG_FANOUT) continue
       for (let i = 0; i < ids.length; i++) {
         for (let j = i + 1; j < ids.length; j++) {
           const key = ids[i] < ids[j] ? `${ids[i]}|${ids[j]}` : `${ids[j]}|${ids[i]}`
