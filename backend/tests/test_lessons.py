@@ -109,3 +109,41 @@ def test_scoring_ranks_more_specific_matches_first(client):
     assert hits[0]["match_score"] > hits[1]["match_score"]
     for reason in ("machine", "stack", "project"):
         assert reason in hits[0]["match_reasons"]
+
+
+def test_cache_returns_same_results_and_marks_them(client):
+    add_lesson(client, "cached lesson", "【触发签名】\nsocksio",
+               ["kind:lesson", "scope:universal"])
+
+    first = match(client, "socksio")
+    second = match(client, "socksio")
+    assert [x["id"] for x in first] == [x["id"] for x in second]
+    assert "cached" not in first[0]["match_reasons"]
+    assert "cached" in second[0]["match_reasons"]
+    assert second[0]["match_score"] == first[0]["match_score"]
+
+
+def test_cache_invalidated_when_a_lesson_is_added(client):
+    add_lesson(client, "first", "【触发签名】\nconnection refused",
+               ["kind:lesson", "scope:universal"])
+    assert len(match(client, "connection refused")) == 1
+    match(client, "connection refused")  # populate cache
+
+    add_lesson(client, "second", "【触发签名】\nconnection refused",
+               ["kind:lesson", "scope:universal"])
+    # The corpus fingerprint is part of the cache key, so the stale single-hit
+    # entry must be unreachable rather than served.
+    assert len(match(client, "connection refused")) == 2
+
+
+def test_rerank_cutoff_is_configurable(monkeypatch):
+    """The cutoff is tuned on very few points, so it must be movable without a
+    code change — see the measurement note in lesson_service."""
+    from app.services import lesson_service
+
+    monkeypatch.delenv("KB_RERANK_CUTOFF", raising=False)
+    assert lesson_service._rerank_cutoff() == -0.9
+    monkeypatch.setenv("KB_RERANK_CUTOFF", "-1.5")
+    assert lesson_service._rerank_cutoff() == -1.5
+    monkeypatch.setenv("KB_RERANK_CUTOFF", "not-a-number")
+    assert lesson_service._rerank_cutoff() == -0.9

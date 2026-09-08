@@ -70,6 +70,37 @@ class NoopEmbeddingProvider(EmbeddingProvider):
         return False
 
 
+class RerankProvider(abc.ABC):
+    name: str = "base"
+
+    @abc.abstractmethod
+    def rerank(self, query: str, documents: List[str]) -> Optional[List[float]]:
+        """Relevance score per document, aligned with `documents`, or None when
+        unavailable.
+
+        A cross-encoder reads query and document together instead of comparing
+        two independently-built vectors, which is why its scores separate far
+        more sharply than cosine — measured here, ~3.0 of headroom around the
+        cutoff versus ~0.1 for the bi-encoder.
+        """
+
+    def is_configured(self) -> bool:
+        return True
+
+
+class NoopRerankProvider(RerankProvider):
+    """Used when RERANK_* env is absent: matching falls back to raw vector
+    similarity with a tighter, more fragile floor."""
+
+    name = "noop"
+
+    def rerank(self, query: str, documents: List[str]) -> Optional[List[float]]:
+        return None
+
+    def is_configured(self) -> bool:
+        return False
+
+
 class STTProvider(abc.ABC):
     name: str = "base"
 

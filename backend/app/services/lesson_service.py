@@ -10,12 +10,15 @@ false on Windows is worse than no lesson at all, so scope tags that contradict
 the caller's situation drop the row entirely rather than merely lowering it.
 """
 
+import hashlib
+import json
+import os
 import re
 import sqlite3
 from typing import List, Optional
 
 from app.providers.embedding import cosine, pack_vector, unpack_vector
-from app.providers.factory import get_embedding_provider
+from app.providers.factory import get_embedding_provider, get_rerank_provider
 from app.services.attachment_service import list_attachment_rows
 from app.services.common import knowledge_out
 from app.utils import parse_tags, utcnow_iso
@@ -155,17 +158,52 @@ def _candidate_rows(conn: sqlite3.Connection, signature: str) -> list:
 
 
 def _semantic_text(row) -> str:
-    """What actually gets embedded: the concept, not the raw error string.
+    """What gets embedded and reranked: title + 根因 + 解法.
 
-    Signature keys are the keyword layer's job. Folding them into the vector
-    would only dilute it — the two layers are meant to catch different things
-    (literal repeat vs. same cause worded differently)."""
-    content = row["content"] or ""
-    cause = re.search(r"【根因】\s*\n(.*?)(?=\n\s*【|\Z)", content, re.S)
+    Not the raw error string — signature keys are the keyword layer's job, and
+    folding them in only dilutes the vector.
+
+    解法 earns its place by measurement, not symmetry: "不小心把 node_modules
+    提交上去了怎么撤回" scored -3.48 against a lesson carrying only title+根因
+    and -0.81 once 解法 was included. Queries phrased as "how do I undo this"
+    are answered by the remedy, so leaving it out made exactly that phrasing
+    unmatchable.
+    """
     parts = [row["title"] or ""]
-    if cause:
-        parts.append(cause.group(1).strip())
+    for marker in ("【根因】", "【解法】"):
+        section = _section(row["content"], marker)
+        if section:
+            parts.append(section)
     return "\n".join(p for p in parts if p).strip()
+
+
+def _section(content: str, marker: str) -> str:
+    found = re.search(re.escape(marker) + r"\s*\n(.*?)(?=\n\s*【|\Z)", content or "", re.S)
+    return found.group(1).strip() if found else ""
+
+
+def _rerank_texts(row) -> List[str]:
+    """Two views of one lesson, scored separately, best score wins.
+
+    Different phrasings want different halves of a lesson, and no single blob
+    serves both. Measured: "Invalid Host header" (asking *what is this error*)
+    matches title+根因 at -0.74 but disappears entirely once 解法 is mixed in,
+    because the remedy is Vite-specific while the question came from webpack.
+    "node_modules 提交了怎么撤回" (asking *how do I fix it*) is the mirror image:
+    -3.48 against 根因, -0.81 against 解法.
+
+    Scoring both and keeping the max got every true positive through while
+    single-blob variants each lost one — and it is what pushed the worst true
+    positive above the best false positive, which no single representation did.
+    """
+    title = row["title"] or ""
+    texts = []
+    for marker in ("【根因】", "【解法】"):
+        section = _section(row["content"], marker)
+        text = "{}\n{}".format(title, section).strip() if section else title.strip()
+        if text and text not in texts:
+            texts.append(text)
+    return texts or [title.strip() or "(untitled)"]
 
 
 def embed_lesson(conn: sqlite3.Connection, knowledge_id: int) -> bool:
@@ -195,8 +233,97 @@ def embed_lesson(conn: sqlite3.Connection, knowledge_id: int) -> bool:
     return True
 
 
-SEMANTIC_FLOOR = 0.50
-SEMANTIC_MAX_HITS = 3
+# Recall floor, not a precision cut: the reranker makes the final call, so this
+# only has to avoid dragging the whole corpus into the rerank batch.
+SEMANTIC_FLOOR = 0.35
+SEMANTIC_MAX_HITS = 10
+
+# Precision cut on cross-encoder scores, with the two-view scoring above.
+# Measured over 6 real lessons and 8 queries: true positives bottom out at -0.74
+# ("Invalid Host header") and the nearest false positives are "怎么配置 nginx
+# 反向代理" at -1.01 and "docker compose 启动失败" at -1.81, so -0.9 separates
+# every case — narrowly.
+#
+# Two caveats worth keeping in view. The margin is 0.27, tuned on 8 points, so
+# treat it as provisional; that is why it is an env knob rather than a constant.
+# And the plausible near-misses are the ones that hurt: an obviously unrelated
+# query ("怎么做红烧肉") is rejected by a mile, while a query from the same
+# neighbourhood as a lesson sits right on the line. Callers see the score, so a
+# consumer wanting a stricter bar can apply its own.
+def _rerank_cutoff() -> float:
+    try:
+        return float(os.environ.get("KB_RERANK_CUTOFF", "-0.9"))
+    except ValueError:
+        return -0.9
+
+# Used only when no reranker is configured, where the bi-encoder has to make the
+# precision call by itself and the workable band is much narrower.
+VECTOR_ONLY_FLOOR = 0.50
+
+
+def _corpus_fingerprint(conn: sqlite3.Connection) -> str:
+    row = conn.execute(
+        "SELECT COUNT(*) AS n, COALESCE(MAX(updated_at), '') AS latest"
+        " FROM knowledge_items WHERE (',' || tags || ',') LIKE ?",
+        ["%,{},%".format(LESSON_TAG)],
+    ).fetchone()
+    return "{}:{}".format(row["n"], row["latest"])
+
+
+def _cache_key(conn: sqlite3.Connection, signature: str, os_name, machine,
+               stack, project_id) -> str:
+    raw = "|".join([
+        signature.strip(), os_name or "", machine or "",
+        ",".join(sorted(stack or [])), str(project_id or ""),
+        _corpus_fingerprint(conn),
+    ])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _cache_get(conn: sqlite3.Connection, cache_key: str, limit: int):
+    """Previously matched ids for this exact situation, re-materialised.
+
+    Only ids are cached, never the rendered items — a lesson's text can be
+    edited without changing the corpus fingerprint's row count, and serving a
+    stale copy of its body would be worse than the cache miss it saves.
+    """
+    row = conn.execute(
+        "SELECT result_ids FROM lesson_match_cache WHERE cache_key = ?", (cache_key,)
+    ).fetchone()
+    if row is None:
+        return None
+    try:
+        entries = json.loads(row["result_ids"])
+    except (ValueError, TypeError):
+        return None
+    if not entries:
+        return []
+    out = []
+    for entry in entries[:limit]:
+        kid = entry["id"]
+        item_row = conn.execute("{} WHERE k.id = ?".format(_ITEM_SELECT), (kid,)).fetchone()
+        if item_row is None:
+            return None  # a cached lesson was deleted; recompute instead
+        item = knowledge_out(item_row, attachments=list_attachment_rows(conn, kid),
+                             content_preview=True)
+        item["match_score"] = entry["score"]
+        item["match_reasons"] = entry["reasons"] + ["cached"]
+        out.append(item)
+    return out
+
+
+def _cache_put(conn: sqlite3.Connection, cache_key: str, items: List[dict]) -> None:
+    conn.execute(
+        "INSERT INTO lesson_match_cache (cache_key, result_ids, created_at)"
+        " VALUES (?, ?, ?)"
+        " ON CONFLICT(cache_key) DO UPDATE SET"
+        " result_ids=excluded.result_ids, created_at=excluded.created_at",
+        (cache_key, json.dumps([
+            {"id": i["id"], "score": i["match_score"], "reasons": i["match_reasons"]}
+            for i in items
+        ]), utcnow_iso()),
+    )
+    conn.commit()
 
 
 def _semantic_candidates(conn: sqlite3.Connection, signature: str,
@@ -234,28 +361,81 @@ def _semantic_candidates(conn: sqlite3.Connection, signature: str,
     return {kid: score for score, kid in hits[:SEMANTIC_MAX_HITS]}
 
 
+def _apply_rerank(conn: sqlite3.Connection, signature: str, candidates: dict):
+    """Let a cross-encoder make the precision call on the recalled candidates.
+
+    The vector floor above is deliberately loose because it only has to achieve
+    recall; this is where things actually get rejected. Without a reranker the
+    bi-encoder has to do both jobs, so the tighter VECTOR_ONLY_FLOOR applies
+    instead — workable, but with roughly a tenth of the headroom.
+    """
+    if not candidates:
+        return candidates, False
+    provider = get_rerank_provider()
+    if not provider.is_configured():
+        return {
+            kid: value for kid, value in candidates.items()
+            if value[1] != "semantic" or (value[2] or 0.0) >= VECTOR_ONLY_FLOOR
+        }, False
+
+    docs = []
+    owners = []
+    for kid in candidates:
+        for text in _rerank_texts(candidates[kid][0]):
+            docs.append(text)
+            owners.append(kid)
+    scores = provider.rerank(signature, docs)
+    if scores is None:
+        return candidates, False  # reranker unreachable: degrade to recall results
+
+    best = {}
+    for kid, score in zip(owners, scores):
+        if kid not in best or score > best[kid]:
+            best[kid] = score
+
+    kept = {}
+    for kid, score in best.items():
+        row, hit_kind, _similarity = candidates[kid]
+        if hit_kind != "semantic" or score >= _rerank_cutoff():
+            kept[kid] = (row, hit_kind, score)
+    return kept, True
+
+
 def match_lessons(conn: sqlite3.Connection, signature: str,
                   os_name: Optional[str] = None, machine: Optional[str] = None,
                   stack: Optional[List[str]] = None, project_id: Optional[int] = None,
                   limit: int = 10) -> List[dict]:
     limit = max(1, min(int(limit), 50))
 
+    cache_key = _cache_key(conn, signature, os_name, machine, stack, project_id)
+    cached = _cache_get(conn, cache_key, limit)
+    if cached is not None:
+        return cached
+
+    reranked = False
+    keyword_rows = _candidate_rows(conn, signature)
     candidates = {}
-    for row, hit_kind in _candidate_rows(conn, signature):
+    for row, hit_kind in keyword_rows:
         candidates[row["id"]] = (row, hit_kind, None)
 
-    # Semantic pass: adds lessons whose wording differs but whose cause matches,
-    # and upgrades ones the keyword pass only reached by partial overlap.
-    for kid, similarity in _semantic_candidates(conn, signature).items():
-        if kid in candidates:
-            row, hit_kind, _ = candidates[kid]
-            candidates[kid] = (row, hit_kind, similarity)
-        else:
-            row = conn.execute(
-                "{} WHERE k.id = ?".format(_ITEM_SELECT), (kid,)
-            ).fetchone()
-            if row is not None:
-                candidates[kid] = (row, "semantic", similarity)
+    # Short circuit: a signature hit means the incoming error literally contains
+    # a marker someone recorded, which is stronger evidence than anything the
+    # models can offer. Returning here keeps the common case — the same error
+    # hit twice — at a few milliseconds and touches no model at all.
+    strong = any(kind == "signature" for _row, kind in keyword_rows)
+
+    if not strong:
+        for kid, similarity in _semantic_candidates(conn, signature).items():
+            if kid in candidates:
+                row, hit_kind, _ = candidates[kid]
+                candidates[kid] = (row, hit_kind, similarity)
+            else:
+                row = conn.execute(
+                    "{} WHERE k.id = ?".format(_ITEM_SELECT), (kid,)
+                ).fetchone()
+                if row is not None:
+                    candidates[kid] = (row, "semantic", similarity)
+        candidates, reranked = _apply_rerank(conn, signature, candidates)
 
     scored = []
     for row, hit_kind, similarity in candidates.values():
@@ -272,7 +452,10 @@ def match_lessons(conn: sqlite3.Connection, signature: str,
             score -= 1  # meaning-only match: useful, but weaker evidence
             reasons = ["semantic"] + reasons[1:]
         if similarity is not None:
-            reasons.append("similarity={:.2f}".format(similarity))
+            # After reranking this number is a cross-encoder logit, not a cosine;
+            # labelling them the same would invite comparing incomparable scales.
+            label = "rerank" if reranked else "similarity"
+            reasons.append("{}={:.2f}".format(label, similarity))
         scored.append((score, similarity or 0.0, row["updated_at"], row, reasons))
 
     # Similarity has to sit in the sort key, not just the output: semantic-only
@@ -287,4 +470,5 @@ def match_lessons(conn: sqlite3.Connection, signature: str,
         item["match_score"] = score
         item["match_reasons"] = reasons
         out.append(item)
+    _cache_put(conn, cache_key, out)
     return out

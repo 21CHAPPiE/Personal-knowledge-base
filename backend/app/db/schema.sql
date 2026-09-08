@@ -53,6 +53,15 @@ CREATE TABLE IF NOT EXISTS knowledge_embeddings (
     updated_at   TEXT NOT NULL
 );
 
+-- Cached lesson-match results. The corpus fingerprint is part of the key, so
+-- adding or editing any lesson makes every prior entry unreachable rather than
+-- stale — cheaper and safer than tracking invalidation per row.
+CREATE TABLE IF NOT EXISTS lesson_match_cache (
+    cache_key   TEXT PRIMARY KEY,
+    result_ids  TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
 -- FTS5 external-content index kept in sync with knowledge_items via triggers.
 CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
     title,

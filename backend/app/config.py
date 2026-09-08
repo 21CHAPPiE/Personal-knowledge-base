@@ -39,6 +39,10 @@ class Settings:
         self.embed_api_key = os.environ.get("EMBED_API_KEY", "").strip()
         self.embed_model = os.environ.get("EMBED_MODEL", "").strip()
 
+        self.rerank_base_url = os.environ.get("RERANK_BASE_URL", "").strip().rstrip("/")
+        self.rerank_api_key = os.environ.get("RERANK_API_KEY", "").strip()
+        self.rerank_model = os.environ.get("RERANK_MODEL", "").strip()
+
         self.api_token = os.environ.get("KB_API_TOKEN", "").strip()
 
     @property
@@ -48,6 +52,10 @@ class Settings:
     @property
     def embed_configured(self) -> bool:
         return bool(self.embed_base_url and self.embed_model)
+
+    @property
+    def rerank_configured(self) -> bool:
+        return bool(self.rerank_base_url)
 
     @property
     def stt_configured(self) -> bool:

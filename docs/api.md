@@ -66,6 +66,16 @@
   **加权**：signature 命中 5 分（必要条件）、machine 命中 +3、stack 命中 +2、
   project_id 相同 +2、`scope:universal` +1。同分按 `updated_at` 倒序。
 
+  匹配分两层：`【触发签名】` 逐行命中就**短路直接返回**（毫秒级，不调模型）；落空才走
+  向量召回（bge-m3，宽松阈值只负责召回）→ 交叉编码器精排（bge-reranker-v2-m3），
+  精排对每条教训的『标题+根因』和『标题+解法』两种表示分别打分取最高（不同问法需要
+  不同的那一半），高于 `KB_RERANK_CUTOFF`（默认 -0.9）才返回。结果按
+  『查询+环境+教训集指纹』缓存，加一条教训即让旧缓存自然失效。
+  三层可独立降级：无重排序退回向量严阈值，无向量退回纯关键词，全无则仅关键词可用。
+
+- `GET /api/lessons/status` → embedding 配置状态与已向量化条数
+- `POST /api/lessons/reindex` → 为缺失或换过模型的教训回填向量
+
   教训的写入没有专用端点，就用 `POST /api/knowledge`（`type=project_note` + `kind:lesson` tag）。
   tag 规范与正文模板见 `docs/lessons-system-plan.md` 与 `skills/kb/SKILL.md`。
 

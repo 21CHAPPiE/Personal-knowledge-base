@@ -12,7 +12,7 @@ from typing import List, Optional
 
 import httpx
 
-from app.providers.base import EmbeddingProvider
+from app.providers.base import EmbeddingProvider, RerankProvider
 
 
 class OpenAICompatEmbeddingProvider(EmbeddingProvider):
@@ -90,3 +90,54 @@ def cosine(a: List[float], b: List[float]) -> float:
     if na <= 0.0 or nb <= 0.0:
         return 0.0
     return dot / ((na ** 0.5) * (nb ** 0.5))
+
+
+class OpenAICompatRerankProvider(RerankProvider):
+    """Cross-encoder reranking via llama.cpp's /rerank endpoint."""
+
+    name = "openai-compat-rerank"
+
+    def __init__(self, base_url: str, api_key: str, model: str, timeout: float = 60.0):
+        if not base_url:
+            raise ValueError("rerank provider requires base_url")
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.model = model
+        self.timeout = timeout
+
+    def _headers(self) -> dict:
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = "Bearer {}".format(self.api_key)
+        return headers
+
+    def rerank(self, query: str, documents: List[str]) -> Optional[List[float]]:
+        query = (query or "").strip()
+        if not query or not documents:
+            return None
+        payload = {"query": query, "documents": documents, "top_n": len(documents)}
+        if self.model:
+            payload["model"] = self.model
+        try:
+            resp = httpx.post("{}/rerank".format(self.base_url), json=payload,
+                              headers=self._headers(), timeout=self.timeout)
+        except httpx.HTTPError:
+            return None
+        if resp.status_code != 200:
+            return None
+        try:
+            rows = resp.json()["results"]
+        except (ValueError, KeyError, TypeError):
+            return None
+        scores = [None] * len(documents)
+        for row in rows:
+            try:
+                idx = int(row["index"])
+                score = row.get("relevance_score", row.get("score"))
+                if 0 <= idx < len(scores) and score is not None:
+                    scores[idx] = float(score)
+            except (KeyError, TypeError, ValueError):
+                continue
+        if any(s is None for s in scores):
+            return None
+        return scores
