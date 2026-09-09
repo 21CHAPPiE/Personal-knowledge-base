@@ -422,9 +422,19 @@ def match_lessons(conn: sqlite3.Connection, signature: str,
     # a marker someone recorded, which is stronger evidence than anything the
     # models can offer. Returning here keeps the common case — the same error
     # hit twice — at a few milliseconds and touches no model at all.
-    strong = any(kind == "signature" for _row, kind in keyword_rows)
+    #
+    # That reasoning only holds for a *lone* hit. Two lessons can share a
+    # marker while describing unrelated root causes — a generic user-facing
+    # message ("后端连接失败：HTTP 500") logged once for a proxy misconfiguration
+    # and once for an unrelated concurrency bug, concretely, on 2026-09-09 —
+    # and tag-based scoring alone has no way to tell which one actually
+    # applies; it produced a tie. Falling through to the semantic/rerank path
+    # below whenever more than one signature hit is in play lets the 根因/解法
+    # text, not just the shared surface marker, decide the ranking.
+    signature_hit_count = sum(1 for _row, kind in keyword_rows if kind == "signature")
+    unambiguous = signature_hit_count == 1
 
-    if not strong:
+    if not unambiguous:
         for kid, similarity in _semantic_candidates(conn, signature).items():
             if kid in candidates:
                 row, hit_kind, _ = candidates[kid]

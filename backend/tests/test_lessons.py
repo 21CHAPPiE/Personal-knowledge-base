@@ -111,6 +111,40 @@ def test_scoring_ranks_more_specific_matches_first(client):
         assert reason in hits[0]["match_reasons"]
 
 
+def test_ambiguous_signature_hits_fall_through_to_rerank(client, monkeypatch):
+    """A lone literal signature hit is trusted outright (fast path, no model
+    involved). Two lessons sharing a marker while describing different root
+    causes must not get that same free pass — this is exactly what happened
+    with two real lessons that both logged the browser's generic "后端连接
+    失败：HTTP 500" message, one for a proxy misconfiguration and one for an
+    unrelated concurrency bug: tag-based scoring alone tied them 5-5. The fix
+    is falling through to the semantic/rerank path (which scores 根因/解法,
+    not the shared surface marker) whenever more than one signature hit is in
+    play; this test pins that control-flow change without depending on a real
+    embedding/rerank model being configured.
+    """
+    from app.services import lesson_service
+
+    calls = []
+    monkeypatch.setattr(
+        lesson_service, "_semantic_candidates",
+        lambda conn, signature, threshold=lesson_service.SEMANTIC_FLOOR: (calls.append(signature) or {}),
+    )
+
+    add_lesson(client, "one", "【触发签名】\n后端连接失败：HTTP 500",
+               ["kind:lesson", "scope:universal"])
+    match(client, "后端连接失败：HTTP 500")
+    assert calls == [], "a single signature hit must stay on the fast path"
+
+    add_lesson(client, "two", "【触发签名】\n后端连接失败：HTTP 500",
+               ["kind:lesson", "scope:universal"])
+    match(client, "后端连接失败：HTTP 500")
+    assert len(calls) == 1, (
+        "two lessons sharing a marker must not short-circuit past the "
+        "semantic/rerank step just because each one alone would have"
+    )
+
+
 def test_cache_returns_same_results_and_marks_them(client):
     add_lesson(client, "cached lesson", "【触发签名】\nsocksio",
                ["kind:lesson", "scope:universal"])
