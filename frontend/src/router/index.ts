@@ -11,6 +11,7 @@ const router = createRouter({
     { path: '/projects/:id', name: 'project-detail', component: () => import('../views/ProjectDetail.vue'), props: true },
     { path: '/search', name: 'search', component: () => import('../views/Search.vue') },
     { path: '/graph', name: 'graph', component: () => import('../views/KnowledgeGraph.vue') },
+    { path: '/review', name: 'review', component: () => import('../views/Review.vue') },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('../views/Dashboard.vue') },
   ],
 })

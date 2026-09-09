@@ -17,8 +17,32 @@ export class ApiError extends Error {
 // KB_API_TOKEN support: only relevant when the backend has it configured
 // (e.g. the public frp-exposed instance). Prompted once per browser and
 // cached in localStorage; cleared on 401 so a wrong/stale token re-prompts.
+//
+// ?kb_token=… in the URL wins over both, and is what makes this usable on
+// iOS: Safari evicts localStorage for a plain-HTTP origin aggressively
+// enough (worse for a home-screen web app) that the prompt came back on
+// every single visit. A bookmark carrying the token re-seeds storage on
+// each load, so the prompt stops depending on whether iOS kept anything.
+// The token is stripped from the address bar afterwards so it isn't left
+// sitting in a screenshot or a shared link.
+function tokenFromUrl(): string | null {
+  try {
+    const url = new URL(window.location.href)
+    const token = url.searchParams.get('kb_token')
+    if (token == null) return null
+    localStorage.setItem('kb_token', token)
+    url.searchParams.delete('kb_token')
+    window.history.replaceState({}, '', url.toString())
+    return token
+  } catch {
+    return null
+  }
+}
+
 function getToken(): string {
   try {
+    const fromUrl = tokenFromUrl()
+    if (fromUrl != null) return fromUrl
     let token = localStorage.getItem('kb_token')
     if (token == null) {
       token = window.prompt('知识库访问 Token（后端未配置鉴权可留空）') ?? ''
@@ -210,4 +234,28 @@ export interface LessonsStatus {
 
 export async function getLessonsStatus(): Promise<LessonsStatus> {
   return json(await apiFetch('/api/lessons/status'))
+}
+
+export async function listProposals(limit = 50): Promise<KnowledgeItem[]> {
+  return json(await apiFetch(`/api/proposals?limit=${limit}`))
+}
+
+// The items a proposal is about, read live — the titles frozen into the
+// proposal's own text are truncated, and judging a grouping means reading
+// what the items actually say.
+export async function getProposalItems(id: number): Promise<KnowledgeItem[]> {
+  return json(await apiFetch(`/api/proposals/${id}/items`))
+}
+
+export async function decideProposal(id: number, verdict: 'approve' | 'dismiss', note = ''):
+  Promise<{ proposal: KnowledgeItem; linked_items: number[] }> {
+  return json(await apiFetch(`/api/proposals/${id}/decide`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ verdict, note, by: 'human' }),
+  }))
+}
+
+export async function getRubric(): Promise<{ item: KnowledgeItem; criteria: string; decisions: string[] }> {
+  return json(await apiFetch('/api/proposals/rubric'))
 }

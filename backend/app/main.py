@@ -9,7 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import attachments, knowledge, lessons, llm, projects, search, stats
+from app.api import (attachments, knowledge, lessons, llm, projects, proposals,
+                     search, stats)
 from app.config import get_settings
 from app.db.database import get_connection, init_db
 from app.providers.factory import get_llm_provider, get_stt_provider
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(attachments.router)
     app.include_router(search.router)
     app.include_router(lessons.router)
+    app.include_router(proposals.router)
     app.include_router(llm.router)
     app.include_router(stats.router)
 

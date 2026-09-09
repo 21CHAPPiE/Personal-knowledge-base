@@ -100,14 +100,18 @@ onMounted(async () => {
        piece of knowledge means waits here for a person. Surfaced on the page you
        already open, because a review list nobody passes is a list nobody reads. -->
   <div v-if="!loading && proposals.length" class="card review">
-    <h2>待审 <span class="count">夜间维护发现 {{ proposals.length }} 项，需要你确认</span></h2>
+    <h2>
+      待审
+      <span class="count">维护发现 {{ proposals.length }} 项，需要你确认</span>
+      <RouterLink class="more" to="/review">逐条审 →</RouterLink>
+    </h2>
     <RouterLink v-for="p in proposals" :key="p.id" :to="`/knowledge/${p.id}`" class="line">
       <span class="title">{{ p.title.replace('待审 · ', '') }}</span>
       <span class="when">{{ fmtTime(p.created_at) }}</span>
     </RouterLink>
   </div>
 
-  <template v-else>
+  <template>
     <div class="cards">
       <div v-for="c in cards" :key="c.project.id" class="card">
         <h2>
