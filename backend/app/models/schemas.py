@@ -146,3 +146,14 @@ class SuggestTagsRequest(BaseModel):
 class LLMStatusOut(BaseModel):
     llm: dict
     stt: dict
+
+
+class LogicGroupItem(BaseModel):
+    id: int
+    title: str
+    excerpt: str
+
+
+class LogicGroupsRequest(BaseModel):
+    items: List[LogicGroupItem]
+    context: Optional[str] = None

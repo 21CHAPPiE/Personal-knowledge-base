@@ -246,12 +246,116 @@ def find_stale_paths(items, open_props, log, dry_run):
     return found
 
 
+# Tags too generic to bound a useful batch — grouping by "kind:event" would
+# just hand the model the entire project. What's left after excluding these
+# (人物:<name> for a book-extraction project, say) is whatever axis the data
+# actually varies on, without hardcoding what that axis is for any one project.
+GENERIC_TAG_PREFIXES = ("kind:", "作品:", "章节:", "设备:", "cost:", "about:",
+                        "proposal:", "scope:", "machine:", "os:", "stack:", "not:")
+LOGIC_GROUP_BATCH_MIN = 3
+LOGIC_GROUP_BATCH_MAX = 30
+
+
+def _excerpt(item, length=150):
+    text = (item.get("content") or item.get("title") or "").strip()
+    text = " ".join(text.split())
+    return text[:length]
+
+
+def _logic_group_batches(items):
+    """Item batches worth sending to the model together: small enough for one
+    prompt, large enough that a shared cause has more than one item to hide in.
+
+    A whole project under LOGIC_GROUP_BATCH_MAX goes as one batch. A bigger
+    project is split by whichever non-generic tags bound a mid-sized cluster —
+    for a project with 人物:<name> tags this lands on "this character's
+    events", which is exactly the scope a shared motive is likely to sit
+    inside; for a project without such tags it contributes no batches, which
+    is correct — there's nothing here to bound the prompt by.
+    """
+    by_project = {}
+    for it in items:
+        if it.get("project_id") is not None:
+            by_project.setdefault(it["project_id"], []).append(it)
+
+    for project_id, project_items in by_project.items():
+        if len(project_items) < LOGIC_GROUP_BATCH_MIN:
+            continue
+        if len(project_items) <= LOGIC_GROUP_BATCH_MAX:
+            yield project_id, project_items
+            continue
+        by_tag = {}
+        for it in project_items:
+            for tag in it["tags"]:
+                if tag.startswith(GENERIC_TAG_PREFIXES):
+                    continue
+                by_tag.setdefault(tag, []).append(it)
+        for tag, tagged_items in by_tag.items():
+            if LOGIC_GROUP_BATCH_MIN <= len(tagged_items) <= LOGIC_GROUP_BATCH_MAX:
+                yield project_id, tagged_items
+
+
+def find_logic_groups(items, open_props, log, dry_run):
+    """Ask the local model which items share a root cause/motive, not just a
+    topic — the "propose don't rewrite" version of schema induction: compare
+    several concrete cases at once and surface the shared structure, rather
+    than matching one query against one case at a time (that's what
+    lesson_service's rerank does; this is the write-time counterpart).
+    """
+    projects = {}
+    found = 0
+    for project_id, batch in _logic_group_batches(items):
+        context = projects.get(project_id)
+        if context is None:
+            try:
+                context = api("GET", "/api/projects/%d" % project_id)["name"]
+            except Exception:  # noqa: BLE001
+                context = None
+            projects[project_id] = context
+        payload = {
+            "items": [{"id": it["id"], "title": it["title"], "excerpt": _excerpt(it)}
+                     for it in batch],
+        }
+        if context:
+            payload["context"] = context
+        try:
+            result = api("POST", "/api/llm/logic-groups", json_body=payload)
+        except Exception as exc:  # noqa: BLE001
+            log("  逻辑分组失败: %s" % exc)
+            continue
+        by_id = {it["id"]: it for it in batch}
+        for group in result.get("groups", []):
+            ids = group.get("item_ids") or []
+            if len(ids) < 2:
+                continue
+            key = "about:logic-%s" % "-".join(str(i) for i in sorted(ids))
+            if key in open_props:
+                continue
+            open_props.add(key)
+            found += 1
+            titles = "\n".join("#%d %s" % (i, by_id[i]["title"]) for i in ids if i in by_id)
+            propose("logic-group",
+                    "疑似同一底层逻辑：%s" % "、".join("#%d" % i for i in ids),
+                    "模型认为下面这几条背后是同一个底层逻辑，而不只是碰巧提到同一个人/同一个场景：\n\n"
+                    "%s\n\n【共同逻辑】\n%s\n\n"
+                    "建议：确认后可以互相加引用，或者视情况归到同一个主题下。"
+                    % (titles, group.get("shared_logic", "")),
+                    [key.split(":", 1)[1]], dry_run)
+    if found:
+        log("  疑似同一逻辑: %d 组" % found)
+    return found
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--full", action="store_true", help="全量巡检（默认只看上次之后变动的）")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--force", action="store_true", help="GPU 忙也照跑")
     ap.add_argument("--summary-limit", type=int, default=20)
+    ap.add_argument("--logic-groups", action="store_true",
+                    help="额外跑一遍\"哪几条底层逻辑相通\"分析（每次调用都要经过全部符合条件的"
+                         "批次调本地模型，比其它检查贵得多；先手动跑几次确认输出质量，"
+                         "再决定要不要并入默认的每夜例行）")
     args = ap.parse_args()
 
     started = time.time()
@@ -284,7 +388,14 @@ def main():
     log("[待审提议]")
     dups = find_duplicates(scope, open_props, log, args.dry_run)
     stale = find_stale_paths(scope, open_props, log, args.dry_run)
-    if not dups and not stale:
+    logic = 0
+    if args.logic_groups:
+        # The whole corpus, not just `scope`: a shared cause has to be found
+        # against everything in a project, not only what changed since last
+        # run — an old item's motive doesn't stop being relevant just because
+        # it wasn't touched today.
+        logic = find_logic_groups(items, open_props, log, args.dry_run)
+    if not dups and not stale and not logic:
         log("  没有需要人工确认的问题")
 
     if not args.dry_run:

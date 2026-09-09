@@ -86,6 +86,11 @@
   成功返回 `{summary, provider, ...}`；provider 报错且 `fallback=true` 时用无 LLM 摘要降级（`provider: "fallback"`）；`fallback=false` 报错时 502
 - `POST /api/llm/suggest-tags` → body `{"knowledge_id": 1, "apply": false, "fallback": true}`；
   `apply=true` 时把推荐 tags 合并写回条目
+- `POST /api/llm/logic-groups` → body `{"items": [{"id":1,"title":"...","excerpt":"..."}, ...], "context": "可选，如项目名"}`；
+  返回 `{groups: [{item_ids:[...], shared_logic:"..."}], provider}`。按"底层逻辑/因果是否相通"给条目分组，
+  不是按主题/共同实体分组；未配置 LLM 或条目数 < 2 时返回空 `groups`（不是错误）。只读，不写任何东西——
+  `scripts/kb_maintenance.py --logic-groups` 是唯一调用方，把返回的组转成 `kind:proposal` 供人审核，
+  自己从不据此合并/重写知识
 
 ## 统计
 

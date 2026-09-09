@@ -20,6 +20,16 @@ class LLMProvider(abc.ABC):
     def suggest_tags(self, title: str, content: str) -> List[str]:
         """Return 0-5 suggested tags."""
 
+    def find_logic_groups(self, items: List[dict], context: Optional[str] = None) -> List[dict]:
+        """Group items sharing an underlying cause/mechanism, not just a topic.
+
+        Concrete (not abstract) with an empty default: this is an optional
+        enhancement layered on top of the core provider contract, not
+        something every provider must implement — a provider that only ever
+        gets asked to summarize is still a complete provider.
+        """
+        return []
+
     def is_configured(self) -> bool:
         return True
 

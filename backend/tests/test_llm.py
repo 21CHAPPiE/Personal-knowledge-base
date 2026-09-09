@@ -39,6 +39,60 @@ def test_suggest_tags_fallback_noop(client):
     assert body["tags"] == []
 
 
+def test_logic_groups_noop_returns_empty(client):
+    resp = client.post("/api/llm/logic-groups", json={
+        "items": [{"id": 1, "title": "a", "excerpt": "x"},
+                  {"id": 2, "title": "b", "excerpt": "y"}],
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["groups"] == []
+    assert body["provider"] == "noop"
+
+
+def test_logic_groups_too_few_items_short_circuits(client, monkeypatch):
+    """Fewer than two items can never form a group — never worth a model call."""
+    monkeypatch.setenv("QWEN_BASE_URL", "http://fake.local/v1")
+    monkeypatch.setenv("QWEN_API_KEY", "sk-test")
+    monkeypatch.setenv("QWEN_MODEL", "qwen-test")
+    import app.providers.qwen as qwen_mod
+
+    called = []
+    monkeypatch.setattr(qwen_mod.httpx, "post", lambda *a, **k: called.append(1))
+
+    resp = client.post("/api/llm/logic-groups", json={
+        "items": [{"id": 1, "title": "a", "excerpt": "x"}],
+    })
+    assert resp.status_code == 200
+    assert resp.json()["groups"] == []
+    assert called == [], "must not call the model for a single item"
+
+
+def test_logic_groups_parses_qwen_response_and_drops_unknown_ids(client, monkeypatch):
+    monkeypatch.setenv("QWEN_BASE_URL", "http://fake.local/v1")
+    monkeypatch.setenv("QWEN_API_KEY", "sk-test")
+    monkeypatch.setenv("QWEN_MODEL", "qwen-test")
+    import app.providers.qwen as qwen_mod
+
+    raw = '[{"item_ids": [1, 2, 999], "shared_logic": "都是为了还债"}, {"item_ids": [3], "shared_logic": "太少了"}]'
+    monkeypatch.setattr(qwen_mod.httpx, "post",
+                        lambda *a, **k: FakeResponse({"choices": [{"message": {"content": raw}}]}))
+
+    resp = client.post("/api/llm/logic-groups", json={
+        "items": [{"id": 1, "title": "a", "excerpt": "x"},
+                  {"id": 2, "title": "b", "excerpt": "y"},
+                  {"id": 3, "title": "c", "excerpt": "z"}],
+        "context": "天幕红尘",
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["provider"] == "qwen"
+    assert body["groups"] == [{"item_ids": [1, 2], "shared_logic": "都是为了还债"}], (
+        "an id the caller never sent (999) must be dropped, and a group left "
+        "with fewer than 2 real items must be dropped entirely"
+    )
+
+
 def test_summarize_with_qwen_provider(client, monkeypatch):
     monkeypatch.setenv("QWEN_BASE_URL", "http://fake.local/v1")
     monkeypatch.setenv("QWEN_API_KEY", "sk-test")

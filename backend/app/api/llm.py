@@ -9,7 +9,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.db.database import get_db
-from app.models.schemas import SummarizeRequest, SuggestTagsRequest
+from app.models.schemas import LogicGroupsRequest, SummarizeRequest, SuggestTagsRequest
 from app.providers.factory import get_llm_provider
 from app.providers.qwen import LLMProviderError
 from app.utils import parse_tags, utcnow_iso
@@ -75,6 +75,25 @@ def summarize(data: SummarizeRequest, conn: sqlite3.Connection = Depends(get_db)
         "fallback": not provider.is_configured() or err is not None,
         "error": err,
     }
+
+
+@router.post("/logic-groups")
+def logic_groups(data: LogicGroupsRequest):
+    """Group items by shared underlying logic (根因/动机/因果), not shared
+    topic — the maintenance script's building block for the "propose a
+    cross-reference" pass. Never writes anything itself; the caller decides
+    what to do with the groups (kb_maintenance.py turns them into
+    kind:proposal entries for a person to review).
+    """
+    provider = get_llm_provider()
+    if not provider.is_configured() or len(data.items) < 2:
+        return {"groups": [], "provider": provider.name}
+    try:
+        groups = provider.find_logic_groups(
+            [item.model_dump() for item in data.items], context=data.context)
+    except LLMProviderError as exc:
+        return {"groups": [], "provider": provider.name, "error": str(exc)}
+    return {"groups": groups, "provider": provider.name}
 
 
 @router.post("/suggest-tags")
