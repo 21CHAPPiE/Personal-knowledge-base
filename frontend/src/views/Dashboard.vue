@@ -21,6 +21,7 @@ const cards = ref<ProjectCard[]>([])
 const daily = ref<KnowledgeItem[]>([])
 const lessons = ref<KnowledgeItem[]>([])
 const visits = ref<VisitedItem[]>([])
+const proposals = ref<KnowledgeItem[]>([])
 const query = ref('')
 const router = useRouter()
 
@@ -53,6 +54,8 @@ onMounted(async () => {
     }))
     cards.value = built.sort((a, b) =>
       b.project.updated_at.localeCompare(a.project.updated_at))
+
+    proposals.value = await listKnowledge({ tag: 'kind:proposal', limit: 6 })
 
     daily.value = (await listKnowledge({ limit: 30 }))
       .filter((k) => k.project_id == null).slice(0, 5)
@@ -92,6 +95,17 @@ onMounted(async () => {
   </div>
 
   <p v-if="loading" class="empty">加载中…</p>
+
+  <!-- Nightly maintenance only ever proposes; anything that would change what a
+       piece of knowledge means waits here for a person. Surfaced on the page you
+       already open, because a review list nobody passes is a list nobody reads. -->
+  <div v-if="!loading && proposals.length" class="card review">
+    <h2>待审 <span class="count">夜间维护发现 {{ proposals.length }} 项，需要你确认</span></h2>
+    <RouterLink v-for="p in proposals" :key="p.id" :to="`/knowledge/${p.id}`" class="line">
+      <span class="title">{{ p.title.replace('待审 · ', '') }}</span>
+      <span class="when">{{ fmtTime(p.created_at) }}</span>
+    </RouterLink>
+  </div>
 
   <template v-else>
     <div class="cards">
@@ -221,6 +235,10 @@ onMounted(async () => {
   margin-left: auto;
   font-size: 0.76rem;
   font-weight: 400;
+}
+.review {
+  border-left: 3px solid #f4a261;
+  margin-bottom: 14px;
 }
 .empty {
   font-size: 0.82rem;
