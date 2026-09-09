@@ -246,53 +246,13 @@ def find_stale_paths(items, open_props, log, dry_run):
     return found
 
 
-# Tags too generic to bound a useful batch — grouping by "kind:event" would
-# just hand the model the entire project. What's left after excluding these
-# (人物:<name> for a book-extraction project, say) is whatever axis the data
-# actually varies on, without hardcoding what that axis is for any one project.
-GENERIC_TAG_PREFIXES = ("kind:", "作品:", "章节:", "设备:", "cost:", "about:",
-                        "proposal:", "scope:", "machine:", "os:", "stack:", "not:")
 LOGIC_GROUP_BATCH_MIN = 3
-LOGIC_GROUP_BATCH_MAX = 30
 
 
 def _excerpt(item, length=150):
     text = (item.get("content") or item.get("title") or "").strip()
     text = " ".join(text.split())
     return text[:length]
-
-
-def _logic_group_batches(items):
-    """Item batches worth sending to the model together: small enough for one
-    prompt, large enough that a shared cause has more than one item to hide in.
-
-    A whole project under LOGIC_GROUP_BATCH_MAX goes as one batch. A bigger
-    project is split by whichever non-generic tags bound a mid-sized cluster —
-    for a project with 人物:<name> tags this lands on "this character's
-    events", which is exactly the scope a shared motive is likely to sit
-    inside; for a project without such tags it contributes no batches, which
-    is correct — there's nothing here to bound the prompt by.
-    """
-    by_project = {}
-    for it in items:
-        if it.get("project_id") is not None:
-            by_project.setdefault(it["project_id"], []).append(it)
-
-    for project_id, project_items in by_project.items():
-        if len(project_items) < LOGIC_GROUP_BATCH_MIN:
-            continue
-        if len(project_items) <= LOGIC_GROUP_BATCH_MAX:
-            yield project_id, project_items
-            continue
-        by_tag = {}
-        for it in project_items:
-            for tag in it["tags"]:
-                if tag.startswith(GENERIC_TAG_PREFIXES):
-                    continue
-                by_tag.setdefault(tag, []).append(it)
-        for tag, tagged_items in by_tag.items():
-            if LOGIC_GROUP_BATCH_MIN <= len(tagged_items) <= LOGIC_GROUP_BATCH_MAX:
-                yield project_id, tagged_items
 
 
 CN_DIGITS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
@@ -373,7 +333,20 @@ def find_logic_groups(items, open_props, log, dry_run):
     adjacency.
     """
     found = 0
-    for project_id, batch in _logic_group_batches(items):
+    by_project = {}
+    for it in items:
+        if it.get("project_id") is not None:
+            by_project.setdefault(it["project_id"], []).append(it)
+
+    for project_id, batch in by_project.items():
+        if len(batch) < LOGIC_GROUP_BATCH_MIN:
+            continue
+        # Abstraction is chunked because it is per-item work, but matching sees
+        # the project's patterns all at once and must not be chunked by
+        # anything: bucketing first (by character, say) would confine every
+        # comparison to one bucket, which is the same mistake as leaving the
+        # names in — cross-context matching cannot find what it never sees
+        # side by side. The labels are short enough that a whole project fits.
         patterns = _abstract(batch, log)
         if len(patterns) < 2:
             continue

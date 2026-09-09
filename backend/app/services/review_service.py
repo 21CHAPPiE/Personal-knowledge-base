@@ -182,10 +182,14 @@ def decide(conn: sqlite3.Connection, proposal_id: int, verdict: str,
 
 
 def pending(conn: sqlite3.Connection, limit: int = 50) -> List[dict]:
+    # Newest first: a proposal is a question about the current state of the
+    # knowledge base, and the most recent analysis is the one whose answer is
+    # worth the most. It also keeps a stale backlog from standing between the
+    # reviewer and what just came in.
     rows = conn.execute(
         "SELECT k.*, p.name AS project_name FROM knowledge_items k"
         " LEFT JOIN projects p ON p.id = k.project_id"
-        " WHERE (',' || k.tags || ',') LIKE ? ORDER BY k.id",
+        " WHERE (',' || k.tags || ',') LIKE ? ORDER BY k.id DESC",
         ["%,{},%".format(PROPOSAL_TAG)],
     ).fetchall()
     out = []
