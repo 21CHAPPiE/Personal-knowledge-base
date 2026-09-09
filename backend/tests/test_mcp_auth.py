@@ -38,11 +38,11 @@ def test_sends_bearer_header_when_token_configured(monkeypatch):
     mod = _load_fresh_module()
     captured = {}
 
-    def fake_urlopen(req, timeout=30):
+    def fake_open(req, timeout=30):
         captured["auth"] = req.get_header("Authorization")
         return FakeResponse()
 
-    monkeypatch.setattr(mod.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(mod._opener, "open", fake_open)
     mod.http_request("GET", "/health")
     assert captured["auth"] == "Bearer sekret"
 
@@ -52,10 +52,10 @@ def test_omits_auth_header_when_token_not_configured(monkeypatch):
     mod = _load_fresh_module()
     captured = {}
 
-    def fake_urlopen(req, timeout=30):
+    def fake_open(req, timeout=30):
         captured["auth"] = req.get_header("Authorization")
         return FakeResponse()
 
-    monkeypatch.setattr(mod.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(mod._opener, "open", fake_open)
     mod.http_request("GET", "/health")
     assert captured["auth"] is None

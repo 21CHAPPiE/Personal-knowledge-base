@@ -27,6 +27,17 @@ DEFAULT_PROTOCOL = "2025-03-26"
 SERVER_NAME = "kb"
 SERVER_VERSION = "0.1.0"
 
+# KB_BASE_URL is always a URL the user configured for their own personal
+# backend (loopback or LAN) — there's never a legitimate reason to route it
+# through a system HTTP/SOCKS proxy meant for reaching the outside internet.
+# Confirmed to fail for real: a machine-wide proxy silently intercepted
+# 127.0.0.1 and returned an empty response instead of connecting, with no
+# error a caller could act on. Building an opener with an empty ProxyHandler
+# makes every request from this process bypass proxy env vars unconditionally
+# — correct regardless of whether the user's system proxy happens to be on or
+# off, since this client's traffic should never touch it either way.
+_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 
 def _base_url() -> str:
     return os.environ.get("KB_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
@@ -62,7 +73,7 @@ def http_request(method: str, path: str, json_body=None,
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with _opener.open(req, timeout=30) as resp:
             raw = resp.read()
     except urllib.error.HTTPError as exc:
         raw = exc.read()

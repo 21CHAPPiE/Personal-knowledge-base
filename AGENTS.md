@@ -21,6 +21,26 @@
 需要两个环境变量：`KB_BASE_URL`（后端地址）和 `KB_API_TOKEN`（后端配了鉴权时必需，
 否则所有请求 401）。
 
+**Codex 一键接入 MCP。** 用户说"帮我把知识库接上"这类话时，走这个流程：
+
+1. 先按方式二（下面）读/问出 `KB_BASE_URL` 和 `KB_API_TOKEN`。
+2. 自己执行注册命令（`<repo>` 换成这个仓库的绝对路径）：
+   ```bash
+   codex mcp add kb --command python --args <repo>/mcp/kb_mcp_server.py \
+     --env KB_BASE_URL=<value> --env KB_API_TOKEN=<value>
+   ```
+   `KB_API_TOKEN` 为空时把 `--env KB_API_TOKEN=...` 这段整个省略，不要传空字符串。
+3. 明确告诉用户：**这一步注册完，工具要等下一次新会话才能真正调用**（跟 Claude Code
+   的 Skill 一样，当前会话看不到刚注册的东西）。当前这一轮如果用户马上要用，先用
+   方式二的 REST 调用把事情做完，MCP 留到下次会话验证。
+4. 下次会话如果 `kb_search` 等工具已经出现在可用工具列表里，就是接入成功了；如果
+   没有，回退到方式二并告诉用户注册可能失败了，需要人工检查。
+
+`mcp/kb_mcp_server.py` 自身已经强制不查系统代理（不管 `http_proxy`/`all_proxy`
+开没开都直连 `KB_BASE_URL`），所以工具调用不应该再被本机代理坑到。如果还是一直
+超时/连不上 backend，但直接 `curl --noproxy '*' $KB_BASE_URL/health` 是通的，
+说明问题出在别处（比如注册命令里的路径/端口写错了），不要再往代理方向排查。
+
 **方式二：直接 curl 调 REST。** 不依赖 MCP 是否注册，做法和参数见
 [`skills/kb/SKILL.md`](skills/kb/SKILL.md)——那份文档虽然是 Claude Code 的 skill 格式，
 但正文就是纯粹的接口用法，对任何 agent 都适用，直接读即可。凭证从

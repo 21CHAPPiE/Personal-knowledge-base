@@ -36,6 +36,41 @@ Every call below targets `$KB_BASE_URL<path>`. When `KB_API_TOKEN` is
 non-empty, add header `Authorization: Bearer $KB_API_TOKEN` — the backend
 rejects everything except `/health` with 401 once it has a token configured.
 
+**Then self-check once** (only right after resolving credentials for the
+first time in a session — not before every call, that's wasted round trips):
+
+```bash
+curl -s -m 5 --noproxy '*' "$KB_BASE_URL/health"
+```
+
+**Every curl call in this document, including the one above, carries
+`--noproxy '*'` — this is not optional/defensive, keep it on every call, every
+time.** `KB_BASE_URL` is always the user's own local/personal backend; a
+system HTTP/SOCKS proxy (VPN/翻墙工具) has no legitimate reason to sit between
+you and it, and confirmed to happen for real on at least one machine: such a
+proxy silently intercepted `127.0.0.1` and returned an empty response instead
+of connecting, with no error a caller could act on (see the `scope:machine`
+lesson example in the table below). `--noproxy '*'` sidesteps the whole
+failure mode unconditionally, whether the user's proxy happens to be on or
+off — cheaper than detecting the symptom and reacting to it.
+
+- `{"status":"ok",...}` or `{"status":"degraded",...}` with HTTP 200 → connection
+  is good, tell the user in one line ("知识库连接成功，可以搜索/新增/更新知识、
+  查项目进度了") and move on to whatever they asked for.
+- `401` → the token is wrong or stale. Don't guess or retry silently: delete
+  `~/.claude/kb-credentials` and re-ask the user for both values.
+- Connection refused / timeout even with `--noproxy '*'` already on → the
+  backend genuinely isn't running, or `KB_BASE_URL` is wrong. Say so plainly
+  rather than reporting a generic failure — the message should let the user
+  fix it in one step (start the backend, or correct the URL).
+
+**curl gotcha — use `--form-string`, not `-F`, for every non-file field below.**
+`-F name=value` treats a value starting with `@` or `<` as "read this from a
+file on disk", silently mangling any title/content/tag that happens to start
+with `@` (an email, an `@mention`, etc.) or `<`. `--form-string` never does
+this — always literal. Only the actual file upload (`file=@path/to/file`) should
+keep using `-F`.
+
 ## Search
 
 `GET /api/search?q=<query>&project_id=&type=&limit=` (`q` required, rest optional).
@@ -55,11 +90,28 @@ this endpoint is multipart-only because it also accepts a file. Fields:
 anything this skill writes).
 
 ```bash
-curl -s -X POST "$KB_BASE_URL/api/knowledge" \
+curl -s --noproxy '*' -X POST "$KB_BASE_URL/api/knowledge" \
   -H "Authorization: Bearer $KB_API_TOKEN" \
-  -F "title=..." -F "content=..." -F "type=text" \
-  -F "tags=..." -F "source=agent"
+  --form-string "title=..." --form-string "content=..." --form-string "type=text" \
+  --form-string "tags=tag-one" --form-string "tags=tag-two" --form-string "source=agent"
 ```
+
+## Update / delete a knowledge item
+
+`PATCH /api/knowledge/<id>` — **JSON body** (not multipart), any subset of
+`title`/`content`/`type`/`project_id`/`tags`/`source`/`summary`. `tags`
+**replaces the whole list** — if the item already has tags you want to keep,
+`GET` it first and send the full merged list, not just the new ones.
+
+```bash
+curl -s --noproxy '*' -X PATCH "$KB_BASE_URL/api/knowledge/<id>" \
+  -H "Authorization: Bearer $KB_API_TOKEN" -H "Content-Type: application/json" \
+  -d '{"content": "..."}'
+```
+
+`DELETE /api/knowledge/<id>` removes the item and its attachments. There is no
+undo — confirm with the user before deleting anything they didn't explicitly
+ask to remove.
 
 ## Project context (get / append)
 
@@ -146,7 +198,7 @@ situation. Full design: `docs/lessons-system-plan.md`.
 touching systemd / networking / permissions / proxies), call it first:
 
 ```bash
-curl -s --get "$KB_BASE_URL/api/lessons/match" \
+curl -s --noproxy '*' --get "$KB_BASE_URL/api/lessons/match" \
   -H "Authorization: Bearer $KB_API_TOKEN" \
   --data-urlencode "signature=<verbatim error text or command>" \
   --data-urlencode "os=linux" \

@@ -23,6 +23,10 @@ import zlib
 BASE = os.environ.get("KB_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 CHECKS = []
 
+# BASE is always this machine's own backend — never route it through a system
+# proxy (see mcp/kb_mcp_server.py for the incident this fixes).
+_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 
 def check(name: str, ok: bool, detail: str = ""):
     CHECKS.append((name, ok, detail))
@@ -36,7 +40,7 @@ def http(method: str, path: str, json_body=None, data=None, headers=None) -> tup
         data = json.dumps(json_body).encode("utf-8")
         req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, data=data, timeout=30) as resp:
+        with _opener.open(req, data=data, timeout=30) as resp:
             return resp.status, json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raw = exc.read()
@@ -76,7 +80,7 @@ def upload_multipart(path: str, fields: list, file_field=None) -> tuple:
         BASE + path, data=out.getvalue(), method="POST",
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with _opener.open(req, timeout=30) as resp:
         return resp.status, json.loads(resp.read().decode("utf-8"))
 
 
@@ -119,7 +123,7 @@ def main() -> int:
           json.dumps(atts, ensure_ascii=False))
     if atts:
         att = atts[0]
-        with urllib.request.urlopen(BASE + att["url"], timeout=30) as resp:
+        with _opener.open(BASE + att["url"], timeout=30) as resp:
             blob = resp.read()
         check("attachment bytes round-trip", blob == png_bytes())
 

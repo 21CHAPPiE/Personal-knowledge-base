@@ -34,6 +34,13 @@ from datetime import datetime, timezone
 STATE = os.path.expanduser("~/.kb_maintenance_state.json")
 CREDS = os.path.expanduser("~/.claude/kb-credentials")
 PROPOSAL_TAG = "kind:proposal"
+
+# BASE is always this machine's own backend (loopback/LAN) — never route it
+# through a system proxy. The systemd timer's environment is clean anyway, so
+# this only matters when running by hand from an interactive shell that has
+# http_proxy/all_proxy set for unrelated reasons, but it's the same fix as
+# mcp/kb_mcp_server.py's and costs nothing to apply here too.
+_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 DUPLICATE_THRESHOLD = 0.93   # near-identical text, not merely related
 GPU_BUSY_PERCENT = 20
 
@@ -73,7 +80,7 @@ def api(method, path, json_body=None, fields=None):
         data = body.encode("utf-8")
         headers["Content-Type"] = "multipart/form-data; boundary=" + boundary
     req = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=300) as resp:
+    with _opener.open(req, timeout=300) as resp:
         return json.load(resp)
 
 

@@ -66,7 +66,8 @@ claude mcp add kb -- python path/to/mcp/kb_mcp_server.py
 
 跨 agent 更可靠的路子是 MCP：`mcp/kb_mcp_server.py` 是标准的 stdio JSON-RPC MCP server
 （零第三方依赖），任何支持 MCP 的客户端都能注册使用，配置时给它 `KB_BASE_URL` 和
-`KB_API_TOKEN` 两个环境变量即可。具体配置语法各家不同，以你所用版本的文档为准。
+`KB_API_TOKEN` 两个环境变量即可。具体配置语法各家不同，以你所用版本的文档为准；
+Codex CLI 的一键注册命令（`codex mcp add ...`）和完整流程见 [`AGENTS.md`](AGENTS.md)。
 
 ## Skill 接入（Claude Code，项目内自动发现，无需注册）
 

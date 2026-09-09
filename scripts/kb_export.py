@@ -23,6 +23,10 @@ CREDS = os.path.expanduser("~/.claude/kb-credentials")
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(REPO, "data")
 
+# BASE is always this machine's own backend — never route it through a system
+# proxy (see mcp/kb_mcp_server.py for the incident this fixes).
+_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 
 def creds():
     base = os.environ.get("KB_BASE_URL", "http://127.0.0.1:8000")
@@ -45,7 +49,7 @@ BASE, TOKEN = creds()
 def api(path):
     req = urllib.request.Request(BASE + path,
                                  headers={"Authorization": "Bearer " + TOKEN} if TOKEN else {})
-    with urllib.request.urlopen(req, timeout=300) as resp:
+    with _opener.open(req, timeout=300) as resp:
         return json.load(resp)
 
 
