@@ -108,12 +108,19 @@ PROMPT = """下面是一段{kind}的实录（口述转文字，可能有识别�
 
 只抽真正的主张，别把过场话、点名、闲聊、组织事务当成主张。
 遇到明显的转写错误（同音字之类）按上下文理解，但不要改写他的意思。
-
+{already}
 严格输出 JSON 数组，不要输出任何其他文字：
 [{{"title":"...","claim":"...","against":"...","examples":["..."],"method":"...","terms":["..."]}}]
 
 实录：
 {body}"""
+
+ALREADY = """
+以下主张在这份材料的前面部分已经抽过了，**不要再抽一遍**——如果这一段只是把
+同一个观点换个说法又讲了一次，跳过它；只有当这一段对它有实质性的新增（新的论证、
+新的适用范围）时，才作为新的一条抽出来，并在 claim 里写清新增的是什么。
+{titles}
+"""
 
 
 def parse_units(raw):
@@ -150,9 +157,20 @@ def body_of(unit):
     return "\n\n".join("【%s】\n%s" % (label, text) for label, text in blocks if text)
 
 
-def chunks(text, size=4000, overlap=300):
-    """Overlapping windows: a claim that straddles a cut would otherwise be
-    lost from both sides, and duplicates are cheaper to spot than gaps."""
+# Sized so a typical lecture or meeting note goes in a single pass: the book
+# extraction runs 12000 characters per call against the same model without
+# trouble, and every cut is a chance to extract the same claim twice from
+# either side of it. A smaller window here produced exactly that — one claim
+# split across the boundary came back as two units.
+CHUNK = 12000
+OVERLAP = 300
+
+
+def chunks(text, size=CHUNK, overlap=OVERLAP):
+    """Overlapping windows, so a claim straddling a cut is lost from neither
+    side. The duplicate this can create is handled by telling the next call
+    what has already been extracted, rather than by a similarity threshold —
+    whether two phrasings are the same claim is a judgement, not a distance."""
     if len(text) <= size:
         return [text]
     out, start = [], 0
@@ -195,8 +213,12 @@ def main():
     seen_titles = set()
     for i, part in enumerate(parts, 1):
         t0 = time.time()
+        already = ""
+        if seen_titles:
+            already = ALREADY.format(
+                titles="\n".join("- " + t for t in sorted(seen_titles)))
         try:
-            raw = chat(PROMPT.format(kind=args.kind, body=part))
+            raw = chat(PROMPT.format(kind=args.kind, body=part, already=already))
         except Exception as exc:  # noqa: BLE001
             print("  第 %d 段失败: %s" % (i, exc))
             continue
