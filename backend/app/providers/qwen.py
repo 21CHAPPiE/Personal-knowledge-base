@@ -85,6 +85,41 @@ class QwenProvider(LLMProvider):
         raw = self.chat(prompt, max_tokens=self.LLM_MAX_TOKENS)
         return self._parse_tags(raw)
 
+    def synthesize_rubric(self, decisions: List[dict]) -> str:
+        """Write down the standard a person has been applying, from what they
+        actually accepted and rejected.
+
+        Derived from verdicts rather than asked for in the abstract, because
+        people are reliably better at judging a case than at stating the rule
+        they judged it by — and a rule stated from cases can be checked back
+        against them.
+        """
+        def block(verdict):
+            lines = []
+            for d in decisions:
+                if d.get("verdict") != verdict:
+                    continue
+                note = (d.get("note") or "").strip()
+                lines.append("- {}{}".format(
+                    (d.get("logic") or "").strip()[:110],
+                    "（本人批注：{}）".format(note) if note and note != "-" else ""))
+            return "\n".join(lines[:30]) or "（没有样本）"
+
+        prompt = (
+            "一个人在审核\"这几条知识背后是不是同一个底层逻辑\"这类提议，"
+            "下面是他**接受**和**否决**的实际案例，每条是该提议对共同逻辑的表述。\n\n"
+            "【他接受的】\n{}\n\n【他否决的】\n{}\n\n"
+            "对比两组，归纳出他真正在用的判断标准。重点看**表述本身写在什么抽象层**："
+            "是在复述发生了什么和前因后果，还是在陈述一条可以脱离具体人物事件成立的机制。"
+            "他的批注是最强的信号，优先照他的话理解。\n\n"
+            "写成一份能直接拿去指导生成的标准，包含：\n"
+            "1. 什么样的表述算合格（正面特征，2-4 条）\n"
+            "2. 什么样的一律不合格（反面特征，2-4 条）\n"
+            "3. 一个合格与不合格的对照例子\n\n"
+            "直接输出这份标准本身，不要写\"根据分析\"之类的开场白，400 字以内。"
+        ).format(block("approve"), block("dismiss"))
+        return self.chat(prompt, max_tokens=1200, enable_thinking=False)
+
     def abstract_patterns(self, items: List[dict]) -> List[dict]:
         """Strip each item down to a structural pattern with the names removed.
 
@@ -135,26 +170,39 @@ class QwenProvider(LLMProvider):
                 out.append({"id": kid, "pattern": pattern})
         return out
 
-    def match_patterns(self, patterns: List[dict]) -> List[dict]:
+    def match_patterns(self, patterns: List[dict], rubric: str = "") -> List[dict]:
         """Find one pattern recurring in unrelated places — the analogy half.
 
-        Only the labels are compared, never the underlying text, and the
-        prompt's job is to reject the easy answer: consecutive scenes of one
-        storyline share a pattern trivially and are exactly what the earlier
-        version of this kept returning.
+        Names are deliberately absent from what the model sees here. An
+        earlier version passed the chapter *and the characters* along for
+        context, which handed back the identities pass one had just stripped:
+        with the names in view the model wrote its answers as narration about
+        those people, and a reviewer reading them saw plot summary rather than
+        a mechanism. Only the chapter survives, and only because it helps
+        avoid proposing neighbours — the actual cross-context requirement is
+        enforced in the caller, not trusted to the prompt.
+
+        The rubric, when there is one, is a reviewer's own standard derived
+        from what they accepted and rejected. It constrains the altitude of
+        the answer, which is the part no amount of grouping accuracy fixes.
         """
         listing = "\n".join(
             "#{} [{}] {}".format(p["id"], p.get("where", ""), p["pattern"]) for p in patterns)
+        standard = (
+            "\n\n【表述必须满足的标准（来自审核者本人的历次判断）】\n{}\n".format(rubric.strip())
+            if rubric.strip() else
+            "\n\nshared_logic 必须写成一条脱离具体人物事件也成立的机制，"
+            "主语用抽象角色（决策者/中间人/债务人），不得复述情节。\n")
         prompt = (
-            "下面是一批事件的抽象结构模式，方括号里是它出现的位置（章节/主要人物）。\n\n{}\n\n"
+            "下面是一批事件的抽象结构模式，方括号里是章节。\n\n{}\n"
             "找出**同一个结构模式在互不相干的地方重复出现**的组。判断标准：\n"
             "- 结构要真的同构：动机的性质、因果的走向、谁得谁失的格局都对得上\n"
             "- 必须跨情境：同一段剧情的连续几幕、同一件事的前后步骤，**一律不算**，"
             "这是最容易犯的错，宁可少给也不要给这种\n"
-            "- 涉及的人物不同、章节相隔较远的匹配才有价值\n\n"
+            "- 章节相隔较远的匹配才有价值{}\n"
             "每组至少 2 条，最多 6 组，找不到就输出 []。\n"
-            '严格输出 JSON：[{{"item_ids":[...],"shared_logic":"这个重复出现的结构是什么，一句话"}}]'
-        ).format(listing)
+            '严格输出 JSON：[{{"item_ids":[...],"shared_logic":"..."}}]'
+        ).format(listing, standard)
         raw = self.chat(prompt, max_tokens=1500, enable_thinking=False)
         return self._parse_logic_groups(raw, valid_ids={p["id"] for p in patterns})
 

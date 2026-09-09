@@ -202,6 +202,41 @@ def pending(conn: sqlite3.Connection, limit: int = 50) -> List[dict]:
     return out
 
 
+def _stated_logic(content: str) -> str:
+    match = re.search(r"【共同逻辑】\s*\n(.*?)(?=\n\s*(?:建议|【)|\Z)", content or "", re.S)
+    return (match.group(1) if match else content or "").strip()
+
+
+def decisions_with_context(conn: sqlite3.Connection) -> List[dict]:
+    """Each verdict paired with the text it was a verdict on.
+
+    The log alone records that something was rejected; deriving a standard
+    needs what was rejected, so the two are joined back together on the
+    proposal's own key.
+    """
+    by_key = {}
+    for row in conn.execute(
+            "SELECT k.*, NULL AS project_name FROM knowledge_items k"
+            " WHERE (',' || k.tags || ',') LIKE ?", ["%,{},%".format(RESOLVED_TAG)]):
+        tags = parse_tags(row["tags"])
+        if RESOLVED_TAG not in tags:
+            continue
+        by_key[_about_key(tags)] = _stated_logic(row["content"])
+
+    out = []
+    for line in decision_log(conn):
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 5:
+            continue
+        _when, about, verdict, by, note = parts[:5]
+        out.append({
+            "about": about, "verdict": verdict, "by": by,
+            "note": "" if note == "-" else note,
+            "logic": by_key.get(about, ""),
+        })
+    return out
+
+
 def referenced_items(conn: sqlite3.Connection, proposal_id: int) -> List[dict]:
     """The items a proposal is about, read live rather than from the snapshot
     baked into its text — the stored titles are truncated, and reviewing a

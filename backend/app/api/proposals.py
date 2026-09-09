@@ -39,6 +39,27 @@ def put_rubric(data: RubricCriteriaRequest, conn: sqlite3.Connection = Depends(g
     return review_service.set_criteria(conn, data.criteria)
 
 
+@router.post("/rubric/synthesize")
+def synthesize_rubric(conn: sqlite3.Connection = Depends(get_db)):
+    """Propose a criteria section derived from the decisions so far.
+
+    Returns it rather than saving it: a standard the reviewer hasn't read is
+    not a standard they agreed to, and the first one especially should be
+    looked at before anything starts being decided by it.
+    """
+    from app.providers.factory import get_llm_provider
+
+    provider = get_llm_provider()
+    decisions = [d for d in review_service.decisions_with_context(conn) if d["logic"]]
+    if not provider.is_configured() or len(decisions) < 4:
+        return {"criteria": "", "provider": provider.name, "decisions": len(decisions)}
+    try:
+        criteria = provider.synthesize_rubric(decisions)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"llm provider failed: {exc}")
+    return {"criteria": criteria, "provider": provider.name, "decisions": len(decisions)}
+
+
 @router.get("/{proposal_id}/items")
 def proposal_items(proposal_id: int, conn: sqlite3.Connection = Depends(get_db)):
     try:

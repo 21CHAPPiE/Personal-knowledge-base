@@ -97,7 +97,7 @@ def abstract_patterns(data: LogicGroupsRequest):
 
 
 @router.post("/match-patterns")
-def match_patterns(data: MatchPatternsRequest):
+def match_patterns(data: MatchPatternsRequest, conn: sqlite3.Connection = Depends(get_db)):
     """Pass 2 of two: the same structure showing up in unrelated places.
 
     Compares only the labels from pass 1, never the source text, which is
@@ -106,8 +106,11 @@ def match_patterns(data: MatchPatternsRequest):
     provider = get_llm_provider()
     if not provider.is_configured() or len(data.patterns) < 2:
         return {"groups": [], "provider": provider.name}
+    from app.services.review_service import rubric_criteria
+
     try:
-        groups = provider.match_patterns([p.model_dump() for p in data.patterns])
+        groups = provider.match_patterns([p.model_dump() for p in data.patterns],
+                                         rubric=rubric_criteria(conn))
     except LLMProviderError as exc:
         return {"groups": [], "provider": provider.name, "error": str(exc)}
     return {"groups": groups, "provider": provider.name}

@@ -300,14 +300,10 @@ def _chapter_number(tags):
     return None
 
 
-def _people(tags):
-    return {t.split(":", 1)[1] for t in tags if t.startswith("人物:")}
-
-
 def _where(it):
-    chapter = next((t.split(":", 1)[1] for t in it["tags"] if t.startswith("章节:")), "")
-    people = "、".join(sorted(_people(it["tags"])))
-    return " ".join(x for x in (chapter, people) if x)
+    """Chapter only — the caller enforces cross-context in code, and handing
+    the model the character names undoes pass one's de-identification."""
+    return next((t.split(":", 1)[1] for t in it["tags"] if t.startswith("章节:")), "")
 
 
 def _abstract(batch, log):

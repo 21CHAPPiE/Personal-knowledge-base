@@ -34,6 +34,10 @@ class LLMProvider(abc.ABC):
         """[{id, pattern}] — each item reduced to a de-identified structure."""
         return []
 
+    def synthesize_rubric(self, decisions: List[dict]) -> str:
+        """The standard a reviewer has been applying, read off their verdicts."""
+        return ""
+
     def match_patterns(self, patterns: List[dict]) -> List[dict]:
         """[{item_ids, shared_logic}] — one structure recurring across contexts."""
         return []
