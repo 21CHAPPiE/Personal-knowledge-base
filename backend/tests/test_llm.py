@@ -282,3 +282,43 @@ def test_qwen_token_budget_covers_reasoning_overhead(client, monkeypatch):
 def test_llm_missing_item_404(client):
     assert client.post("/api/llm/summarize", json={"knowledge_id": 555}).status_code == 404
     assert client.post("/api/llm/suggest-tags", json={"knowledge_id": 555}).status_code == 404
+
+
+class FakeRerank:
+    """Scores by keyword overlap, enough to exercise ranking without a model."""
+    name = "fake"
+
+    def is_configured(self):
+        return True
+
+    def rerank(self, query, documents):
+        return [float(sum(1 for ch in set(query) if ch in d)) for d in documents]
+
+
+def test_discrimination_reports_where_claimed_items_landed(client, monkeypatch):
+    """A claimed item near the middle of the ranking is indistinguishable from
+    one picked at random — the number exists so a reviewer sees that without
+    re-reading the group."""
+    import app.api.llm as llm_api
+
+    monkeypatch.setattr(llm_api, "get_rerank_provider", lambda: FakeRerank())
+    body = client.post("/api/llm/discrimination", json={
+        "statement": "甲乙丙",
+        "claimed": [1, 3],
+        "candidates": [{"id": 1, "text": "甲乙丙"}, {"id": 2, "text": "无关"},
+                       {"id": 3, "text": "戊己"}],
+    }).json()
+    assert body["available"] is True
+    assert body["total"] == 3
+    ranks = {r["id"]: r["rank"] for r in body["claimed_ranks"]}
+    assert ranks[1] == 1, "the item the statement actually describes ranks first"
+    assert ranks[3] > ranks[1]
+    assert body["spread"] > 0
+
+
+def test_discrimination_degrades_without_a_reranker(client):
+    body = client.post("/api/llm/discrimination", json={
+        "statement": "x", "claimed": [1], "candidates": [{"id": 1, "text": "y"}],
+    }).json()
+    assert body == {"available": False}, (
+        "no reranker means the check is unavailable, not that the group failed it")

@@ -9,13 +9,16 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.db.database import get_db
-from app.models.schemas import (LogicGroupsRequest, MatchPatternsRequest,
-                                SummarizeRequest, SuggestTagsRequest)
-from app.providers.factory import get_llm_provider
+from app.models.schemas import (DiscriminationRequest, LogicGroupsRequest,
+                                MatchPatternsRequest, SummarizeRequest,
+                                SuggestTagsRequest)
+from app.providers.factory import get_llm_provider, get_rerank_provider
 from app.providers.qwen import LLMProviderError
 from app.utils import parse_tags, utcnow_iso
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
+
+DISCRIMINATION_CHUNK = 50
 
 
 @router.get("/status")
@@ -114,6 +117,54 @@ def match_patterns(data: MatchPatternsRequest, conn: sqlite3.Connection = Depend
     except LLMProviderError as exc:
         return {"groups": [], "provider": provider.name, "error": str(exc)}
     return {"groups": groups, "provider": provider.name}
+
+
+@router.post("/discrimination")
+def discrimination(data: DiscriminationRequest):
+    """Does this statement actually single out the items it claims, or does it
+    fit everything equally?
+
+    "Vacuous" can't be measured directly, but it has an operational shape: a
+    sentence that fits anything rates every candidate about the same, while a
+    sentence with content rates a few far above the rest. So the statement is
+    scored against the whole corpus and two things are reported — where the
+    items it claims to describe actually landed, and how far the top score
+    sits above the median. A claimed item at the middle of the ranking is
+    indistinguishable from one picked at random, which is worth knowing
+    before trusting the group it sits in.
+
+    This checks for vacuity, not for truth: a statement can single out its own
+    members perfectly and still be a worthless observation ("these all happen
+    indoors"). Judging whether it says anything worth saying stays with the
+    reader.
+    """
+    provider = get_rerank_provider()
+    if not provider.is_configured() or not data.candidates or not data.statement.strip():
+        return {"available": False}
+
+    # Chunked because a cross-encoder scores each pair independently, so the
+    # split costs nothing — and a whole corpus in one request does not fit
+    # under the provider timeout. Measured here: 197 documents took 64s
+    # against a 60s limit, and the only symptom was the check silently
+    # reporting itself unavailable.
+    scores = []
+    for start in range(0, len(data.candidates), DISCRIMINATION_CHUNK):
+        chunk = data.candidates[start:start + DISCRIMINATION_CHUNK]
+        part = provider.rerank(data.statement, [c.text for c in chunk])
+        if part is None:
+            return {"available": False}
+        scores += part
+
+    pairs = sorted(zip(data.candidates, scores), key=lambda p: p[1], reverse=True)
+    rank_of = {c.id: i + 1 for i, (c, _s) in enumerate(pairs)}
+    ordered = sorted(scores, reverse=True)
+    median = ordered[len(ordered) // 2]
+    return {
+        "available": True,
+        "total": len(scores),
+        "spread": round(ordered[0] - median, 2),
+        "claimed_ranks": [{"id": kid, "rank": rank_of.get(kid)} for kid in data.claimed],
+    }
 
 
 @router.post("/logic-groups")

@@ -169,6 +169,17 @@ class MatchPatternsRequest(BaseModel):
     patterns: List[PatternItem]
 
 
+class DiscriminationCandidate(BaseModel):
+    id: int
+    text: str
+
+
+class DiscriminationRequest(BaseModel):
+    statement: str
+    claimed: List[int]
+    candidates: List[DiscriminationCandidate]
+
+
 class DecideRequest(BaseModel):
     verdict: str
     note: Optional[str] = None

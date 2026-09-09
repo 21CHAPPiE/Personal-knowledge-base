@@ -323,6 +323,60 @@ def _abstract(batch, log):
     return patterns
 
 
+def _discrimination(statement, ids, batch, log):
+    """{item_id: rank} of the claimed items when the statement is scored
+    against the whole corpus. Empty when the reranker isn't available."""
+    if not statement.strip():
+        return {}
+    payload = {
+        "statement": statement,
+        "claimed": ids,
+        "candidates": [{"id": it["id"], "text": "%s\n%s" % (it["title"], _excerpt(it, 400))}
+                       for it in batch],
+    }
+    try:
+        result = api("POST", "/api/llm/discrimination", json_body=payload)
+    except Exception as exc:  # noqa: BLE001 - a group without this check is still a group
+        log("  区分度检验失败: %s" % exc)
+        return {}
+    if not result.get("available"):
+        return {}
+    return {r["id"]: r["rank"] for r in result.get("claimed_ranks", []) if r.get("rank")}
+
+
+def _rank_note(ranks, kid, total):
+    """Flag a member the statement doesn't actually single out.
+
+    Sitting near the middle of the ranking means the statement fits this item
+    about as well as it fits a randomly chosen one — so whatever holds the
+    group together, this member is probably not part of it.
+    """
+    rank = ranks.get(kid)
+    if not rank:
+        return ""
+    if rank > total / 4:
+        return "  ← 这条排第 %d/%d，接近随机位置，很可能是凑进来的" % (rank, total)
+    return "  （第 %d/%d）" % (rank, total)
+
+
+def _discrimination_note(ranks, total):
+    """Name which item landed where, not just the set of positions.
+
+    Reporting "1、2、97" leaves the reader counting to work out which member
+    is the weak one, which is the single thing this check exists to tell them.
+    """
+    parts = []
+    for kid, rank in sorted(ranks.items(), key=lambda kv: kv[1]):
+        flag = "  ← 接近随机，很可能是凑进来的" if rank > total / 4 else ""
+        parts.append("#%d 第 %d 名%s" % (kid, rank, flag))
+    return ("【区分度检验】把上面那句共同逻辑当查询、对全部 %d 条打分排序，"
+            "它声称的这几条实际落在：\n%s\n"
+            "（随机基线约第 %d 名。排名靠前说明这句话确实特指这几条、"
+            "不是对什么都成立的万能句；但这只排除了废话，"
+            "不保证这句话说得对——那仍然要你判断。）"
+            % (total, "\n".join("  " + p for p in parts), total // 2))
+
+
 def _cross_context(ids, by_id):
     """Reject a group that is just one storyline told in consecutive scenes."""
     chapters = [c for c in (_chapter_number(by_id[i]["tags"]) for i in ids if i in by_id)
@@ -379,10 +433,14 @@ def find_logic_groups(items, open_props, log, dry_run):
                 continue
             open_props.add(key)
             found += 1
+            ranks = _discrimination(group.get("shared_logic", ""), ids, batch, log)
             body = "\n".join(
-                "#%d [%s] %s\n    抽象结构：%s"
-                % (i, _where(by_id[i]), by_id[i]["title"], patterns.get(i, "-"))
+                "#%d [%s] %s%s\n    抽象结构：%s"
+                % (i, _where(by_id[i]), by_id[i]["title"], _rank_note(ranks, i, len(batch)),
+                   patterns.get(i, "-"))
                 for i in ids if i in by_id)
+            if ranks:
+                body += "\n\n" + _discrimination_note(ranks, len(batch))
             propose("logic-group",
                     "同一结构重复出现：%s" % "、".join("#%d" % i for i in ids),
                     "这几条来自互不相干的地方，但抽象出来的结构是同一个：\n\n"
