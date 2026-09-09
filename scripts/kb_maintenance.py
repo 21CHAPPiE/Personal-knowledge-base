@@ -133,13 +133,28 @@ def existing_proposals(items):
 
 
 def propose(kind, title, body, about, dry_run):
+    """Write a proposal, already digested.
+
+    A proposal exists to be judged, and judging it starts with reading it, so
+    the summary and tags are generated here rather than left behind buttons
+    the reviewer has to press first — the cost is two calls at write time
+    against a person's attention at read time, every time.
+    """
     tags = [PROPOSAL_TAG, "proposal:" + kind] + ["about:%s" % a for a in about]
     if dry_run:
         print("    [dry-run] 提议 %s: %s" % (kind, title))
         return
-    api("POST", "/api/knowledge", fields=[
+    created = api("POST", "/api/knowledge", fields=[
         ("title", "待审 · " + title), ("content", body), ("type", "text"),
         ("source", "maintenance")] + [("tags", t) for t in tags])
+    for path, payload in (
+            ("/api/llm/summarize", {"knowledge_id": created["id"], "fallback": True}),
+            ("/api/llm/suggest-tags", {"knowledge_id": created["id"], "apply": True})):
+        try:
+            api("POST", path, json_body=payload)
+        except Exception:  # noqa: BLE001 - a proposal without a digest is still a proposal
+            pass
+    return created
 
 
 # --- applied: derived data only -------------------------------------------

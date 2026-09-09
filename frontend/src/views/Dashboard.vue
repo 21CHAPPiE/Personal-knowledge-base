@@ -105,7 +105,9 @@ onMounted(async () => {
       <span class="count">维护发现 {{ proposals.length }} 项，需要你确认</span>
       <RouterLink class="more" to="/review">逐条审 →</RouterLink>
     </h2>
-    <RouterLink v-for="p in proposals" :key="p.id" :to="`/knowledge/${p.id}`" class="line">
+    <!-- Into the queue, not the detail page: these are questions to answer,
+         and the queue is where answering them is one tap instead of five. -->
+    <RouterLink v-for="p in proposals" :key="p.id" to="/review" class="line">
       <span class="title">{{ p.title.replace('待审 · ', '') }}</span>
       <span class="when">{{ fmtTime(p.created_at) }}</span>
     </RouterLink>

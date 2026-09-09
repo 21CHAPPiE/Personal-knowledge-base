@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { recordVisit } from '../recentlyViewed'
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  deleteKnowledge, getKnowledge, getLLMStatus, listProjects,
+  decideProposal, deleteKnowledge, getKnowledge, getLLMStatus, listProjects,
   suggestTags, summarizeKnowledge, updateKnowledge, uploadAttachment,
 } from '../api/client'
 import type { KnowledgeItem, Project } from '../types'
@@ -20,6 +20,24 @@ const notice = ref('')
 const editing = ref(false)
 const draft = ref({ title: '', content: '', project_id: '' as number | '', tags: '' })
 const busy = ref('')
+
+const isProposal = computed(() => item.value?.tags.includes('kind:proposal') ?? false)
+
+async function verdict(v: 'approve' | 'dismiss') {
+  if (!item.value || busy.value) return
+  busy.value = v
+  try {
+    const result = await decideProposal(item.value.id, v)
+    notice.value = v === 'approve'
+      ? `已同意，关联了 ${result.linked_items.length} 条知识`
+      : '已忽略，未改动任何知识'
+    item.value = await getKnowledge(item.value.id)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    busy.value = ''
+  }
+}
 
 async function load() {
   try {
@@ -168,6 +186,20 @@ async function remove() {
           <audio v-else-if="a.mime_type.startsWith('audio/') || a.mime_type.includes('webm')" :src="a.url" controls />
           <a v-else :href="a.url" target="_blank" rel="noopener">下载</a>
         </div>
+        <!-- A proposal is a question, and it has to be answerable wherever it
+             was opened from — arriving here from the homepage instead of the
+             review queue is not a reason to be stuck without the verdict
+             buttons. -->
+        <div v-if="isProposal" class="verdict">
+          <button class="btn primary" :disabled="!!busy" @click="verdict('approve')">
+            {{ busy === 'approve' ? '处理中…' : '同意' }}
+          </button>
+          <button class="btn" :disabled="!!busy" @click="verdict('dismiss')">
+            {{ busy === 'dismiss' ? '处理中…' : '忽略' }}
+          </button>
+          <RouterLink class="btn small" to="/review">去逐条审 →</RouterLink>
+        </div>
+
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
           <button class="btn small" @click="startEdit">编辑</button>
           <button class="btn small" :disabled="!!busy" @click="runSummary">
@@ -207,3 +239,10 @@ async function remove() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.verdict {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+}
+</style>
