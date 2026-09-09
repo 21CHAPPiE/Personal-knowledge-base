@@ -93,6 +93,72 @@ def test_logic_groups_parses_qwen_response_and_drops_unknown_ids(client, monkeyp
     )
 
 
+def test_abstract_patterns_drops_unknown_ids(client, monkeypatch):
+    monkeypatch.setenv("QWEN_BASE_URL", "http://fake.local/v1")
+    monkeypatch.setenv("QWEN_MODEL", "qwen-test")
+    import app.providers.qwen as qwen_mod
+
+    raw = '[{"id":1,"pattern":"甲因关联方破产背债 → 甲用制度差价变现"},{"id":99,"pattern":"不存在"}]'
+    monkeypatch.setattr(qwen_mod.httpx, "post",
+                        lambda *a, **k: FakeResponse({"choices": [{"message": {"content": raw}}]}))
+
+    body = client.post("/api/llm/abstract-patterns", json={
+        "items": [{"id": 1, "title": "a", "excerpt": "x"}],
+    }).json()
+    assert body["patterns"] == [{"id": 1, "pattern": "甲因关联方破产背债 → 甲用制度差价变现"}]
+
+
+def test_abstract_patterns_disables_thinking(client, monkeypatch):
+    """A reasoning model spends the whole budget thinking and returns empty
+    content on a task this size — the flag is not optional here (lesson 21)."""
+    monkeypatch.setenv("QWEN_BASE_URL", "http://fake.local/v1")
+    monkeypatch.setenv("QWEN_MODEL", "qwen-test")
+    import app.providers.qwen as qwen_mod
+
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured.update(json or {})
+        return FakeResponse({"choices": [{"message": {"content": "[]"}}]})
+
+    monkeypatch.setattr(qwen_mod.httpx, "post", fake_post)
+    client.post("/api/llm/abstract-patterns", json={
+        "items": [{"id": 1, "title": "a", "excerpt": "x"}],
+    })
+    assert captured["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_match_patterns_needs_two_patterns(client, monkeypatch):
+    monkeypatch.setenv("QWEN_BASE_URL", "http://fake.local/v1")
+    monkeypatch.setenv("QWEN_MODEL", "qwen-test")
+    import app.providers.qwen as qwen_mod
+
+    called = []
+    monkeypatch.setattr(qwen_mod.httpx, "post", lambda *a, **k: called.append(1))
+
+    body = client.post("/api/llm/match-patterns", json={
+        "patterns": [{"id": 1, "pattern": "甲…", "where": "第一章"}],
+    }).json()
+    assert body["groups"] == []
+    assert called == [], "one pattern can never recur; don't spend a call on it"
+
+
+def test_match_patterns_parses_groups(client, monkeypatch):
+    monkeypatch.setenv("QWEN_BASE_URL", "http://fake.local/v1")
+    monkeypatch.setenv("QWEN_MODEL", "qwen-test")
+    import app.providers.qwen as qwen_mod
+
+    raw = '[{"item_ids":[1,2],"shared_logic":"都是以利益为饵把人引进预设场合"}]'
+    monkeypatch.setattr(qwen_mod.httpx, "post",
+                        lambda *a, **k: FakeResponse({"choices": [{"message": {"content": raw}}]}))
+
+    body = client.post("/api/llm/match-patterns", json={
+        "patterns": [{"id": 1, "pattern": "甲…", "where": "第一章"},
+                     {"id": 2, "pattern": "乙…", "where": "第四十章"}],
+    }).json()
+    assert body["groups"] == [{"item_ids": [1, 2], "shared_logic": "都是以利益为饵把人引进预设场合"}]
+
+
 def test_summarize_with_qwen_provider(client, monkeypatch):
     monkeypatch.setenv("QWEN_BASE_URL", "http://fake.local/v1")
     monkeypatch.setenv("QWEN_API_KEY", "sk-test")

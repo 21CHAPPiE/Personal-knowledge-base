@@ -295,54 +295,120 @@ def _logic_group_batches(items):
                 yield project_id, tagged_items
 
 
+CN_DIGITS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+             "六": 6, "七": 7, "八": 8, "九": 9}
+PATTERN_BATCH = 15
+# A group has to span this many chapters to count as cross-context. Consecutive
+# scenes of one storyline share a structure trivially — that is what the first
+# version of this kept returning, and no prompt wording reliably stops it, so
+# the distance is enforced here rather than asked for.
+MIN_CHAPTER_SPAN = 3
+
+
+def _chapter_number(tags):
+    """第五十一章 -> 51. None when the item isn't chapter-organised."""
+    for tag in tags:
+        if not tag.startswith("章节:"):
+            continue
+        text = tag.split(":", 1)[1].strip().strip("第章")
+        if text.isdigit():
+            return int(text)
+        total = section = 0
+        for ch in text:
+            if ch == "十":
+                section = (section or 1) * 10
+            elif ch in CN_DIGITS:
+                section += CN_DIGITS[ch]
+            else:
+                continue
+        return (total + section) or None
+    return None
+
+
+def _people(tags):
+    return {t.split(":", 1)[1] for t in tags if t.startswith("人物:")}
+
+
+def _where(it):
+    chapter = next((t.split(":", 1)[1] for t in it["tags"] if t.startswith("章节:")), "")
+    people = "、".join(sorted(_people(it["tags"])))
+    return " ".join(x for x in (chapter, people) if x)
+
+
+def _abstract(batch, log):
+    """Pass 1:每条 -> 去人名的结构标签。"""
+    patterns = {}
+    for start in range(0, len(batch), PATTERN_BATCH):
+        chunk = batch[start:start + PATTERN_BATCH]
+        payload = {"items": [{"id": it["id"], "title": it["title"], "excerpt": _excerpt(it, 400)}
+                             for it in chunk]}
+        try:
+            result = api("POST", "/api/llm/abstract-patterns", json_body=payload)
+        except Exception as exc:  # noqa: BLE001
+            log("  抽象失败: %s" % exc)
+            continue
+        for entry in result.get("patterns", []):
+            patterns[entry["id"]] = entry["pattern"]
+    return patterns
+
+
+def _cross_context(ids, by_id):
+    """Reject a group that is just one storyline told in consecutive scenes."""
+    chapters = [c for c in (_chapter_number(by_id[i]["tags"]) for i in ids if i in by_id)
+                if c is not None]
+    if len(chapters) < 2:
+        return True  # not chapter-organised material; nothing to judge on
+    return (max(chapters) - min(chapters)) >= MIN_CHAPTER_SPAN
+
+
 def find_logic_groups(items, open_props, log, dry_run):
-    """Ask the local model which items share a root cause/motive, not just a
-    topic — the "propose don't rewrite" version of schema induction: compare
-    several concrete cases at once and surface the shared structure, rather
-    than matching one query against one case at a time (that's what
-    lesson_service's rerank does; this is the write-time counterpart).
+    """Two passes: abstract each item into a de-identified structure, then look
+    for that structure recurring somewhere unrelated.
+
+    The split is the whole point. Comparing raw text finds "these mention the
+    same person"; comparing de-identified structures is the only way a debt
+    crisis in chapter 5 can match a structurally identical one in chapter 40
+    with a different cast. What comes back still has to clear a chapter-span
+    check, because a model asked for analogy will happily hand back
+    adjacency.
     """
-    projects = {}
     found = 0
     for project_id, batch in _logic_group_batches(items):
-        context = projects.get(project_id)
-        if context is None:
-            try:
-                context = api("GET", "/api/projects/%d" % project_id)["name"]
-            except Exception:  # noqa: BLE001
-                context = None
-            projects[project_id] = context
-        payload = {
-            "items": [{"id": it["id"], "title": it["title"], "excerpt": _excerpt(it)}
-                     for it in batch],
-        }
-        if context:
-            payload["context"] = context
-        try:
-            result = api("POST", "/api/llm/logic-groups", json_body=payload)
-        except Exception as exc:  # noqa: BLE001
-            log("  逻辑分组失败: %s" % exc)
+        patterns = _abstract(batch, log)
+        if len(patterns) < 2:
             continue
         by_id = {it["id"]: it for it in batch}
+        payload = {"patterns": [
+            {"id": kid, "pattern": text, "where": _where(by_id[kid])}
+            for kid, text in patterns.items() if kid in by_id]}
+        try:
+            result = api("POST", "/api/llm/match-patterns", json_body=payload)
+        except Exception as exc:  # noqa: BLE001
+            log("  跨情境匹配失败: %s" % exc)
+            continue
         for group in result.get("groups", []):
-            ids = group.get("item_ids") or []
-            if len(ids) < 2:
+            ids = sorted(set(group.get("item_ids") or []))
+            if len(ids) < 2 or not _cross_context(ids, by_id):
                 continue
-            key = "about:logic-%s" % "-".join(str(i) for i in sorted(ids))
+            key = "about:logic-%s" % "-".join(str(i) for i in ids)
             if key in open_props:
                 continue
             open_props.add(key)
             found += 1
-            titles = "\n".join("#%d %s" % (i, by_id[i]["title"]) for i in ids if i in by_id)
+            body = "\n".join(
+                "#%d [%s] %s\n    抽象结构：%s"
+                % (i, _where(by_id[i]), by_id[i]["title"], patterns.get(i, "-"))
+                for i in ids if i in by_id)
             propose("logic-group",
-                    "疑似同一底层逻辑：%s" % "、".join("#%d" % i for i in ids),
-                    "模型认为下面这几条背后是同一个底层逻辑，而不只是碰巧提到同一个人/同一个场景：\n\n"
+                    "同一结构重复出现：%s" % "、".join("#%d" % i for i in ids),
+                    "这几条来自互不相干的地方，但抽象出来的结构是同一个：\n\n"
                     "%s\n\n【共同逻辑】\n%s\n\n"
-                    "建议：确认后可以互相加引用，或者视情况归到同一个主题下。"
-                    % (titles, group.get("shared_logic", "")),
+                    "建议：确认后可以互相加引用。如果你觉得这只是同一段剧情的先后步骤、"
+                    "而不是同一个模式的重复出现，请忽略——这正是需要你校准的地方。"
+                    % (body, group.get("shared_logic", "")),
                     [key.split(":", 1)[1]], dry_run)
     if found:
-        log("  疑似同一逻辑: %d 组" % found)
+        log("  同一结构重复: %d 组" % found)
     return found
 
 

@@ -9,7 +9,8 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.db.database import get_db
-from app.models.schemas import LogicGroupsRequest, SummarizeRequest, SuggestTagsRequest
+from app.models.schemas import (LogicGroupsRequest, MatchPatternsRequest,
+                                SummarizeRequest, SuggestTagsRequest)
 from app.providers.factory import get_llm_provider
 from app.providers.qwen import LLMProviderError
 from app.utils import parse_tags, utcnow_iso
@@ -75,6 +76,41 @@ def summarize(data: SummarizeRequest, conn: sqlite3.Connection = Depends(get_db)
         "fallback": not provider.is_configured() or err is not None,
         "error": err,
     }
+
+
+@router.post("/abstract-patterns")
+def abstract_patterns(data: LogicGroupsRequest):
+    """Pass 1 of two: each item reduced to a de-identified structural pattern.
+
+    Split from matching on purpose — the labels are the expensive part and
+    they are stable, so a later run only has to label what is new and can
+    reuse the rest.
+    """
+    provider = get_llm_provider()
+    if not provider.is_configured() or not data.items:
+        return {"patterns": [], "provider": provider.name}
+    try:
+        patterns = provider.abstract_patterns([item.model_dump() for item in data.items])
+    except LLMProviderError as exc:
+        return {"patterns": [], "provider": provider.name, "error": str(exc)}
+    return {"patterns": patterns, "provider": provider.name}
+
+
+@router.post("/match-patterns")
+def match_patterns(data: MatchPatternsRequest):
+    """Pass 2 of two: the same structure showing up in unrelated places.
+
+    Compares only the labels from pass 1, never the source text, which is
+    what keeps "these are consecutive scenes" from being the easy answer.
+    """
+    provider = get_llm_provider()
+    if not provider.is_configured() or len(data.patterns) < 2:
+        return {"groups": [], "provider": provider.name}
+    try:
+        groups = provider.match_patterns([p.model_dump() for p in data.patterns])
+    except LLMProviderError as exc:
+        return {"groups": [], "provider": provider.name, "error": str(exc)}
+    return {"groups": groups, "provider": provider.name}
 
 
 @router.post("/logic-groups")

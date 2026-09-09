@@ -157,3 +157,23 @@ class LogicGroupItem(BaseModel):
 class LogicGroupsRequest(BaseModel):
     items: List[LogicGroupItem]
     context: Optional[str] = None
+
+
+class PatternItem(BaseModel):
+    id: int
+    pattern: str
+    where: str = ""
+
+
+class MatchPatternsRequest(BaseModel):
+    patterns: List[PatternItem]
+
+
+class DecideRequest(BaseModel):
+    verdict: str
+    note: Optional[str] = None
+    by: str = "human"
+
+
+class RubricCriteriaRequest(BaseModel):
+    criteria: str

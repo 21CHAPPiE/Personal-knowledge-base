@@ -30,6 +30,14 @@ class LLMProvider(abc.ABC):
         """
         return []
 
+    def abstract_patterns(self, items: List[dict]) -> List[dict]:
+        """[{id, pattern}] — each item reduced to a de-identified structure."""
+        return []
+
+    def match_patterns(self, patterns: List[dict]) -> List[dict]:
+        """[{item_ids, shared_logic}] — one structure recurring across contexts."""
+        return []
+
     def is_configured(self) -> bool:
         return True
 

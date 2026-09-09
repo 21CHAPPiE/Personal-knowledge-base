@@ -85,6 +85,79 @@ class QwenProvider(LLMProvider):
         raw = self.chat(prompt, max_tokens=self.LLM_MAX_TOKENS)
         return self._parse_tags(raw)
 
+    def abstract_patterns(self, items: List[dict]) -> List[dict]:
+        """Strip each item down to a structural pattern with the names removed.
+
+        The de-identification is the load-bearing step, not a tidying pass.
+        Leave "叶子农" in the label and every later comparison is dominated by
+        "same person", which can only ever rediscover one storyline; take the
+        names out and a debt crisis in chapter 5 becomes comparable to a
+        structurally identical one in chapter 40 with a different cast. This
+        is the abstraction half of schema induction — matching happens on
+        these labels, never on the raw text.
+        """
+        listing = "\n\n".join(
+            "#{}\n{}\n{}".format(it["id"], it["title"], it["excerpt"]) for it in items)
+        prompt = (
+            "下面每条是一个事件，含它的动机和因果。\n\n{}\n\n"
+            "把每条抽象成一个**去掉具体人名、地名、机构名**的结构模式，格式像："
+            "「甲因关联方破产背上债务 → 甲用制度差价变现来还债」"
+            "或「乙以利益为饵，把丙引进自己预设的场合」。\n"
+            "只保留角色代号（甲乙丙）、动机和因果关系，20-40 字。"
+            "抽象到\"两件表面完全不同的事，如果内在结构一样，标签就该一样\"的程度，"
+            "但不要泛到\"某人做了某事\"这种一切都能套的废话。\n\n"
+            '严格输出 JSON 数组：[{{"id":编号,"pattern":"..."}}]，不要其他文字。'
+        ).format(listing)
+        raw = self.chat(prompt, max_tokens=1500, enable_thinking=False)
+        return self._parse_patterns(raw, valid_ids={it["id"] for it in items})
+
+    @staticmethod
+    def _parse_patterns(raw: str, valid_ids: set) -> List[dict]:
+        m = re.search(r"\[.*\]", raw, flags=re.S)
+        if not m:
+            return []
+        try:
+            data = json.loads(m.group(0))
+        except ValueError:
+            return []
+        if not isinstance(data, list):
+            return []
+        out = []
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                kid = int(entry.get("id"))
+            except (TypeError, ValueError):
+                continue
+            pattern = str(entry.get("pattern") or "").strip()
+            if kid in valid_ids and pattern:
+                out.append({"id": kid, "pattern": pattern})
+        return out
+
+    def match_patterns(self, patterns: List[dict]) -> List[dict]:
+        """Find one pattern recurring in unrelated places — the analogy half.
+
+        Only the labels are compared, never the underlying text, and the
+        prompt's job is to reject the easy answer: consecutive scenes of one
+        storyline share a pattern trivially and are exactly what the earlier
+        version of this kept returning.
+        """
+        listing = "\n".join(
+            "#{} [{}] {}".format(p["id"], p.get("where", ""), p["pattern"]) for p in patterns)
+        prompt = (
+            "下面是一批事件的抽象结构模式，方括号里是它出现的位置（章节/主要人物）。\n\n{}\n\n"
+            "找出**同一个结构模式在互不相干的地方重复出现**的组。判断标准：\n"
+            "- 结构要真的同构：动机的性质、因果的走向、谁得谁失的格局都对得上\n"
+            "- 必须跨情境：同一段剧情的连续几幕、同一件事的前后步骤，**一律不算**，"
+            "这是最容易犯的错，宁可少给也不要给这种\n"
+            "- 涉及的人物不同、章节相隔较远的匹配才有价值\n\n"
+            "每组至少 2 条，最多 6 组，找不到就输出 []。\n"
+            '严格输出 JSON：[{{"item_ids":[...],"shared_logic":"这个重复出现的结构是什么，一句话"}}]'
+        ).format(listing)
+        raw = self.chat(prompt, max_tokens=1500, enable_thinking=False)
+        return self._parse_logic_groups(raw, valid_ids={p["id"] for p in patterns})
+
     def find_logic_groups(self, items: List[dict], context: Optional[str] = None) -> List[dict]:
         """Group items whose underlying logic/cause is shared, not merely their
         topic. Structural similarity (relations: who caused what, who owes
