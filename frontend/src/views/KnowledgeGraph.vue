@@ -19,6 +19,7 @@ interface GraphLink {
 }
 
 const TYPE_COLORS: Record<string, string> = {
+  person: '#e07a5f',
   project: '#f4a261',
   text: '#4cc9f0',
   screenshot: '#f72585',
@@ -26,6 +27,7 @@ const TYPE_COLORS: Record<string, string> = {
   project_note: '#90be6d',
 }
 const TYPE_LABELS: Record<string, string> = {
+  person: '人物',
   project: '项目',
   text: '文本',
   screenshot: '截图',
@@ -41,8 +43,16 @@ const CLASSIFICATION_PREFIXES = ['kind:', 'scope:', 'os:', 'not:', 'machine:', '
 // Even a topical tag stops meaning "related" once it is on everything.
 const MAX_TAG_FANOUT = 12
 
+// A 人物: tag names someone an entry is about, so it wires the entry to that
+// person rather than to every other entry mentioning them. Left as an ordinary
+// shared tag, a protagonist appearing in 200 events would either mesh those 200
+// together or — past MAX_TAG_FANOUT — be dropped entirely, deleting exactly the
+// characters that matter. As a node, the same protagonist becomes the hub the
+// graph is meant to show.
+const PERSON_PREFIX = '人物:'
+
 function isClassificationTag(tag: string): boolean {
-  return CLASSIFICATION_PREFIXES.some((p) => tag.startsWith(p))
+  return CLASSIFICATION_PREFIXES.some((p) => tag.startsWith(p)) || tag.startsWith(PERSON_PREFIX)
 }
 
 const router = useRouter()
@@ -103,14 +113,41 @@ async function load() {
       })
     }
 
+    // A person who has their own entry *is* that entry — the character's own
+    // node is the hub events attach to. Minting a separate synthetic node would
+    // leave the description stranded beside a hub carrying the same name.
+    const personEntryId = new Map<string, number>()
+    for (const item of items) {
+      if (item.tags.includes('kind:person')) personEntryId.set(item.title.trim(), item.id)
+    }
+    const personNodeId = new Map<string, string>()
+    for (const item of items) {
+      for (const tag of item.tags) {
+        if (!tag.startsWith(PERSON_PREFIX)) continue
+        const name = tag.slice(PERSON_PREFIX.length)
+        if (personNodeId.has(name)) continue
+        const entryId = personEntryId.get(name)
+        personNodeId.set(name, entryId != null ? `k:${entryId}` : `person:${name}`)
+      }
+    }
+    // Only names with no entry of their own need a node minted for them.
+    for (const [name, nodeId] of personNodeId) {
+      if (nodeId.startsWith('k:')) continue
+      nodes.push({
+        id: nodeId, label: name, group: 'person', val: 10,
+        routeName: 'search', routeId: name,
+      })
+    }
+
     const tagToNodeIds = new Map<string, string[]>()
     for (const item of items) {
       const nodeId = `k:${item.id}`
+      const isPersonEntry = item.tags.includes('kind:person')
       nodes.push({
         id: nodeId,
         label: item.title,
-        group: item.type,
-        val: 5,
+        group: isPersonEntry ? 'person' : item.type,
+        val: isPersonEntry ? 10 : 5,
         routeName: 'knowledge-detail',
         routeId: String(item.id),
       })
@@ -118,6 +155,11 @@ async function load() {
         links.push({ source: `p:${item.project_id}`, target: nodeId })
       }
       for (const tag of item.tags) {
+        if (tag.startsWith(PERSON_PREFIX)) {
+          const target = personNodeId.get(tag.slice(PERSON_PREFIX.length))
+          if (target && target !== nodeId) links.push({ source: nodeId, target })
+          continue
+        }
         if (isClassificationTag(tag)) continue
         const bucket = tagToNodeIds.get(tag) ?? []
         bucket.push(nodeId)
@@ -157,7 +199,7 @@ onBeforeUnmount(() => graph?._destructor())
 <template>
   <div class="graph-page">
     <h1>知识图谱</h1>
-    <p class="hint">节点：项目（大）/ 知识条目（小，按类型着色）。连线：项目归属 + 共享标签。点击节点跳转详情。</p>
+    <p class="hint">节点：项目（大）/ 人物 / 知识条目（按类型着色）。连线：项目归属 + 人物出场 + 共享主题标签。点击节点跳转详情。</p>
     <p v-if="loading">加载中…</p>
     <p v-else-if="errorMsg" class="error">加载失败：{{ errorMsg }}</p>
     <div ref="container" class="graph-container"></div>
