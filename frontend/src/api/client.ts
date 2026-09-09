@@ -201,3 +201,13 @@ export async function suggestTags(id: number, apply = false): Promise<{ tags: st
     body: JSON.stringify({ knowledge_id: id, apply }),
   }))
 }
+
+export interface LessonsStatus {
+  embedding: { configured: boolean; provider: string; model: string | null }
+  lessons: number
+  embedded: number
+}
+
+export async function getLessonsStatus(): Promise<LessonsStatus> {
+  return json(await apiFetch('/api/lessons/status'))
+}

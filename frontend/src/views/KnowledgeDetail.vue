@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { recordVisit } from '../recentlyViewed'
 import { onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -23,6 +24,7 @@ const busy = ref('')
 async function load() {
   try {
     item.value = await getKnowledge(Number(props.id))
+    recordVisit(item.value.id, item.value.title)
     projects.value = await listProjects()
     const s = await getLLMStatus()
     llm.value = { configured: s.llm.configured, provider: s.llm.provider }
