@@ -22,12 +22,14 @@ Usage:
 import argparse
 import json
 import os
+import posixpath
 import re
 import sys
 import time
 import urllib.request
 import zipfile
 from html.parser import HTMLParser
+from urllib.parse import unquote
 
 CREDS = os.path.expanduser("~/.claude/kb-credentials")
 BACKEND_ENV = os.path.expanduser("~/.kb_backend.env")
@@ -85,9 +87,9 @@ class _Text(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
-        anchor = attrs.get("id")
-        if anchor:
-            self.anchors[anchor] = self.length
+        for anchor in (attrs.get("id"), attrs.get("name") if tag == "a" else None):
+            if anchor and anchor not in self.anchors:
+                self.anchors[anchor] = self.length
         if tag in ("script", "style"):
             self.skip += 1
         elif tag in ("p", "div", "br", "h1", "h2", "h3"):
@@ -108,36 +110,87 @@ class _Text(HTMLParser):
         return "".join(self.parts)
 
 
+def _attrs(tag_text):
+    return dict(re.findall(r'([\w:-]+)\s*=\s*"([^"]*)"', tag_text))
+
+
 def chapters_from_epub(path):
-    """[(title, body)] in reading order, driven by the book's own TOC."""
+    """[(title, body)] in reading order, driven by the book's own TOC.
+
+    A section runs from its TOC position to the next one's, measured across
+    the whole book stitched together in spine order — not within the single
+    file its TOC entry happens to point at. Books disagree about where a
+    chapter lives: one puts every chapter behind an anchor inside a few large
+    files, another puts a heading-only page in one file and the chapter's text
+    in the next file, which no TOC entry references at all. Reading only the
+    pointed-at file handled the first and silently dropped every chapter of
+    the second, keeping just a 200-character heading that the cover filter
+    then threw away.
+    """
     book = zipfile.ZipFile(path)
-    toc = book.read("OEBPS/toc.ncx").decode("utf-8", "replace")
-    nav = re.findall(r"<navPoint.*?<text>(.*?)</text>.*?src=\"(.*?)\"", toc, re.S)
+    names = set(book.namelist())
 
-    docs = {}
-    for name in book.namelist():
-        if name.endswith(".html") or name.endswith(".xhtml"):
-            parser = _Text()
-            parser.feed(book.read(name).decode("utf-8", "replace"))
-            docs[name.split("/")[-1]] = (parser.text(), parser.anchors)
+    opf_path = None
+    if "META-INF/container.xml" in names:
+        container = book.read("META-INF/container.xml").decode("utf-8", "replace")
+        found = re.search(r'full-path="([^"]+)"', container)
+        opf_path = found.group(1) if found else None
+    if opf_path not in names:
+        opf_path = next((n for n in sorted(names) if n.endswith(".opf")), None)
+    if opf_path is None:
+        raise ValueError("epub has no package document (.opf)")
+    opf_dir = posixpath.dirname(opf_path)
+    opf = book.read(opf_path).decode("utf-8", "replace")
 
-    marks = []
-    for title, src in nav:
-        title = re.sub(r"<[^>]+>", "", title).strip()
-        doc, _, anchor = src.partition("#")
-        doc = doc.split("/")[-1]
-        if doc not in docs:
+    manifest = {}
+    ncx_path = None
+    for tag in re.findall(r"<item\b[^>]*>", opf):
+        a = _attrs(tag)
+        if "id" not in a or "href" not in a:
             continue
-        offset = docs[doc][1].get(anchor, 0) if anchor else 0
-        marks.append((title, doc, offset))
+        full = posixpath.normpath(posixpath.join(opf_dir, unquote(a["href"])))
+        manifest[a["id"]] = full
+        if a.get("media-type") == "application/x-dtbncx+xml":
+            ncx_path = full
+    spine = [manifest[_attrs(t)["idref"]] for t in re.findall(r"<itemref\b[^>]*>", opf)
+             if _attrs(t).get("idref") in manifest]
+    if ncx_path is None:
+        ncx_path = next((n for n in sorted(names) if n.endswith(".ncx")), None)
+    if ncx_path is None:
+        raise ValueError("epub has no NCX table of contents")
+
+    # One continuous text, with each file's start and each anchor as a global
+    # offset, so a TOC position can be compared against any other.
+    pieces, doc_start, anchor_at, total = [], {}, {}, 0
+    for doc in spine:
+        if doc not in names or doc in doc_start:
+            continue
+        parser = _Text()
+        parser.feed(book.read(doc).decode("utf-8", "replace"))
+        doc_start[doc] = total
+        for anchor, local in parser.anchors.items():
+            anchor_at[(doc, anchor)] = total + local
+        pieces.append(parser.text() + "\n")
+        total += len(pieces[-1])
+    full_text = "".join(pieces)
+
+    ncx_dir = posixpath.dirname(ncx_path)
+    toc = book.read(ncx_path).decode("utf-8", "replace")
+    marks = []
+    for title, src in re.findall(r"<navPoint.*?<text>(.*?)</text>.*?src=\"(.*?)\"", toc, re.S):
+        title = re.sub(r"<[^>]+>", "", title).strip()
+        href, _, anchor = src.partition("#")
+        doc = posixpath.normpath(posixpath.join(ncx_dir, unquote(href)))
+        if doc not in doc_start:
+            continue
+        offset = anchor_at.get((doc, anchor), doc_start[doc]) if anchor else doc_start[doc]
+        marks.append((offset, title))
+    marks.sort(key=lambda m: m[0])
 
     out = []
-    for i, (title, doc, offset) in enumerate(marks):
-        text = docs[doc][0]
-        end = len(text)
-        if i + 1 < len(marks) and marks[i + 1][1] == doc:
-            end = marks[i + 1][2]
-        body = re.sub(r"\n{2,}", "\n", text[offset:end]).strip()
+    for i, (offset, title) in enumerate(marks):
+        end = marks[i + 1][0] if i + 1 < len(marks) else len(full_text)
+        body = re.sub(r"\n{2,}", "\n", full_text[offset:end]).strip()
         if len(body) > 200:  # skip the cover/title nav entries
             out.append((title, body))
     return out
