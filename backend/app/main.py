@@ -9,8 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import (attachments, knowledge, lessons, llm, projects, proposals,
-                     search, stats)
+from app.api import (attachments, audit as audit_api, knowledge, lessons, llm,
+                     projects, proposals, search, stats)
+from app.audit import AuditMiddleware
 from app.config import get_settings
 from app.db.database import get_connection, init_db
 from app.providers.factory import get_llm_provider, get_stt_provider
@@ -49,6 +50,11 @@ def create_app() -> FastAPI:
                 return JSONResponse({"detail": "missing or invalid token"}, status_code=401)
         return await call_next(request)
 
+    # Added last, which in Starlette means outermost — so it sees every
+    # request including the ones auth rejects. A refused call is exactly the
+    # kind of thing worth having a record of.
+    app.add_middleware(AuditMiddleware)
+
     app.include_router(projects.router)
     app.include_router(knowledge.router)
     app.include_router(attachments.router)
@@ -57,6 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(proposals.router)
     app.include_router(llm.router)
     app.include_router(stats.router)
+    app.include_router(audit_api.router)
 
     app.mount("/uploads", StaticFiles(directory=str(settings.uploads_dir), check_dir=False), name="uploads")
 

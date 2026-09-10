@@ -55,10 +55,13 @@ function getToken(): string {
 }
 
 function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
-  const token = getToken()
-  if (!token) return fetch(input, init)
   const headers = new Headers(init.headers)
-  headers.set('Authorization', `Bearer ${token}`)
+  // Name the caller so the access log can separate "a person clicked this"
+  // from "an agent did this on its own". Self-reported, like every other
+  // client's — it distinguishes callers, it does not authenticate them.
+  headers.set('X-KB-Agent', 'browser')
+  const token = getToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
   return fetch(input, { ...init, headers })
 }
 
@@ -258,4 +261,24 @@ export async function decideProposal(id: number, verdict: 'approve' | 'dismiss',
 
 export async function getRubric(): Promise<{ item: KnowledgeItem; criteria: string; decisions: string[] }> {
   return json(await apiFetch('/api/proposals/rubric'))
+}
+
+export interface AuditEntry {
+  at: string
+  method: string
+  path: string
+  query: string
+  status: number
+  ms: number
+  agent: string
+  machine: string
+  ip: string
+}
+
+export async function getAudit(opts: { limit?: number; writesOnly?: boolean; agent?: string } = {}):
+  Promise<{ entries: AuditEntry[]; note: string }> {
+  const params = new URLSearchParams({ limit: String(opts.limit ?? 200) })
+  if (opts.writesOnly) params.set('writes_only', 'true')
+  if (opts.agent) params.set('agent', opts.agent)
+  return json(await apiFetch(`/api/audit?${params}`))
 }

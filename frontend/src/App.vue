@@ -12,6 +12,7 @@ import { RouterLink, RouterView } from 'vue-router'
       <RouterLink to="/search">搜索</RouterLink>
       <RouterLink to="/graph">图谱</RouterLink>
       <RouterLink to="/review">待审</RouterLink>
+      <RouterLink to="/audit">日志</RouterLink>
     </nav>
   </div>
   <main class="main">

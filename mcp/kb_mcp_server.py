@@ -59,7 +59,11 @@ def http_request(method: str, path: str, json_body=None,
     mime, bytes) file fields — encoded by the helper below.
     """
     url = _base_url() + path
-    headers = {}
+    # Named on every call so the backend's access log can show which client
+    # touched what. Self-reported and unverified — it records what happened,
+    # not who to believe.
+    headers = {"X-KB-Agent": os.environ.get("KB_AGENT", "mcp"),
+               "X-KB-Machine": os.environ.get("KB_MACHINE", "")}
     token = _api_token()
     if token:
         headers["Authorization"] = f"Bearer {token}"

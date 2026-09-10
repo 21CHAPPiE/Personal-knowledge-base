@@ -22,6 +22,7 @@ data/knowledge.db-wal
 data/knowledge.db-shm
 data/uploads/*
 !data/uploads/.gitkeep
+data/access.jsonl*
 
 # --- 环境变量（Key 不进 Git）---
 .env

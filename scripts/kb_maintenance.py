@@ -67,7 +67,9 @@ BASE, TOKEN = creds()
 
 
 def api(method, path, json_body=None, fields=None):
-    headers = {"Authorization": "Bearer " + TOKEN} if TOKEN else {}
+    headers = {"X-KB-Agent": "kb-maintenance"}
+    if TOKEN:
+        headers["Authorization"] = "Bearer " + TOKEN
     data = None
     if json_body is not None:
         data = json.dumps(json_body).encode()

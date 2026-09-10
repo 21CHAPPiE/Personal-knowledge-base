@@ -12,6 +12,7 @@ const router = createRouter({
     { path: '/search', name: 'search', component: () => import('../views/Search.vue') },
     { path: '/graph', name: 'graph', component: () => import('../views/KnowledgeGraph.vue') },
     { path: '/review', name: 'review', component: () => import('../views/Review.vue') },
+    { path: '/audit', name: 'audit', component: () => import('../views/Audit.vue') },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('../views/Dashboard.vue') },
   ],
 })

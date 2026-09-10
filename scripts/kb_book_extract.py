@@ -230,7 +230,9 @@ def parse_events(raw):
 # --- knowledge base ---------------------------------------------------------
 
 def api(method, path, json_body=None, fields=None):
-    headers = {"Authorization": "Bearer " + CFG["kb_token"]} if CFG["kb_token"] else {}
+    headers = {"X-KB-Agent": "kb-book-extract"}
+    if CFG["kb_token"]:
+        headers["Authorization"] = "Bearer " + CFG["kb_token"]
     data = None
     if json_body is not None:
         data = json.dumps(json_body).encode("utf-8")
