@@ -15,6 +15,7 @@ interface ProjectCard {
 }
 
 const error = ref('')
+const cardsError = ref('')
 const loading = ref(true)
 const totals = ref({ items: 0, projects: 0, today: 0, lessons: 0 })
 const cards = ref<ProjectCard[]>([])
@@ -48,10 +49,24 @@ onMounted(async () => {
     // The context endpoint answers both questions in one request — exact count
     // and newest entries — where counting by fetching would drag a hundred full
     // records across the wire per project just to call length on them.
-    const built = await Promise.all(projects.map(async (p) => {
+    //
+    // allSettled rather than all: one project's context call failing must not
+    // blank every other project's card along with it — that all-or-nothing
+    // failure mode is indistinguishable from "nothing to show" to whoever is
+    // looking at the resulting empty page, and there'd be no error banner to
+    // explain it since nothing actually reached the outer catch below.
+    const settled = await Promise.allSettled(projects.map(async (p) => {
       const ctx = await getProjectContext(p.id)
       return { project: p, count: ctx.statistics.total_items, recent: ctx.recent_items.slice(0, 4) }
     }))
+    const built = settled.filter((r): r is PromiseFulfilledResult<ProjectCard> => r.status === 'fulfilled')
+      .map((r) => r.value)
+    const failed = settled.filter((r) => r.status === 'rejected')
+    if (failed.length) {
+      cardsError.value = `${failed.length} 个项目加载失败：` +
+        failed.map((r) => (r as PromiseRejectedResult).reason instanceof Error
+          ? (r as PromiseRejectedResult).reason.message : String((r as PromiseRejectedResult).reason)).join('; ')
+    }
     cards.value = built.sort((a, b) =>
       b.project.updated_at.localeCompare(a.project.updated_at))
 
@@ -80,6 +95,7 @@ onMounted(async () => {
 
 <template>
   <div v-if="error" class="error-bar">后端连接失败：{{ error }}（确认 backend 已启动）</div>
+  <div v-if="cardsError" class="error-bar">{{ cardsError }}</div>
 
   <form class="searchbar" @submit.prevent="search">
     <input v-model="query" placeholder="搜索全部知识…" />
@@ -113,54 +129,63 @@ onMounted(async () => {
     </RouterLink>
   </div>
 
-  <template>
-    <div class="cards">
-      <div v-for="c in cards" :key="c.project.id" class="card">
-        <h2>
-          <RouterLink :to="`/projects/${c.project.id}`">{{ c.project.name }}</RouterLink>
-          <span class="count">{{ c.count }} 条</span>
-        </h2>
-        <p v-if="c.project.description" class="desc">{{ c.project.description }}</p>
-        <RouterLink
-          v-for="k in c.recent" :key="k.id" :to="`/knowledge/${k.id}`" class="line">
-          <span class="badge" :class="`type-${k.type}`">{{ TYPE_LABELS[k.type] || k.type }}</span>
-          <span class="title">{{ k.title }}</span>
-          <span class="when">{{ fmtTime(k.updated_at) }}</span>
-        </RouterLink>
-        <p v-if="!c.recent.length" class="empty">还没有条目</p>
-      </div>
-
-      <div v-if="daily.length" class="card">
-        <h2>日常知识 <span class="count">无项目</span></h2>
-        <RouterLink v-for="k in daily" :key="k.id" :to="`/knowledge/${k.id}`" class="line">
-          <span class="badge" :class="`type-${k.type}`">{{ TYPE_LABELS[k.type] || k.type }}</span>
-          <span class="title">{{ k.title }}</span>
-          <span class="when">{{ fmtTime(k.updated_at) }}</span>
-        </RouterLink>
-      </div>
+  <div class="cards">
+    <div v-for="c in cards" :key="c.project.id" class="card">
+      <h2>
+        <RouterLink :to="`/projects/${c.project.id}`">{{ c.project.name }}</RouterLink>
+        <span class="count">{{ c.count }} 条</span>
+      </h2>
+      <p v-if="c.project.description" class="desc">{{ c.project.description }}</p>
+      <RouterLink
+        v-for="k in c.recent" :key="k.id" :to="`/knowledge/${k.id}`" class="line">
+        <span class="badge" :class="`type-${k.type}`">{{ TYPE_LABELS[k.type] || k.type }}</span>
+        <span class="title">{{ k.title }}</span>
+        <span class="when">{{ fmtTime(k.updated_at) }}</span>
+      </RouterLink>
+      <p v-if="!c.recent.length" class="empty">还没有条目</p>
     </div>
 
-    <div class="cards">
-      <div v-if="lessons.length" class="card">
-        <!-- Lessons are consulted rather than browsed, so they get their own
-             entrance instead of being mixed into a general recent list. -->
-        <h2>最近教训 <RouterLink class="more" to="/knowledge?tag=kind:lesson">全部 →</RouterLink></h2>
-        <RouterLink v-for="k in lessons" :key="k.id" :to="`/knowledge/${k.id}`" class="line">
-          <span class="title">{{ k.title }}</span>
-          <span class="when">{{ fmtTime(k.updated_at) }}</span>
-        </RouterLink>
-      </div>
-
-      <div v-if="visits.length" class="card">
-        <h2>最近查看 <span class="count">本机记录</span></h2>
-        <RouterLink v-for="v in visits" :key="v.id" :to="`/knowledge/${v.id}`" class="line">
-          <span class="title">{{ v.title }}</span>
-          <span class="when">{{ fmtTime(v.at) }}</span>
-        </RouterLink>
-      </div>
+    <div v-if="daily.length" class="card">
+      <h2>日常知识 <span class="count">无项目</span></h2>
+      <RouterLink v-for="k in daily" :key="k.id" :to="`/knowledge/${k.id}`" class="line">
+        <span class="badge" :class="`type-${k.type}`">{{ TYPE_LABELS[k.type] || k.type }}</span>
+        <span class="title">{{ k.title }}</span>
+        <span class="when">{{ fmtTime(k.updated_at) }}</span>
+      </RouterLink>
     </div>
-  </template>
+  </div>
+
+  <div class="cards">
+    <div v-if="lessons.length" class="card">
+      <!-- Lessons are consulted rather than browsed, so they get their own
+           entrance instead of being mixed into a general recent list. -->
+      <h2>最近教训 <RouterLink class="more" to="/knowledge?tag=kind:lesson">全部 →</RouterLink></h2>
+      <RouterLink v-for="k in lessons" :key="k.id" :to="`/knowledge/${k.id}`" class="line">
+        <span class="title">{{ k.title }}</span>
+        <span class="when">{{ fmtTime(k.updated_at) }}</span>
+      </RouterLink>
+    </div>
+
+    <div v-if="visits.length" class="card">
+      <h2>最近查看 <span class="count">本机记录</span></h2>
+      <RouterLink v-for="v in visits" :key="v.id" :to="`/knowledge/${v.id}`" class="line">
+        <span class="title">{{ v.title }}</span>
+        <span class="when">{{ fmtTime(v.at) }}</span>
+      </RouterLink>
+    </div>
+  </div>
 </template>
+
+<!-- This section used to sit inside a bare <template> with no directive.
+     Vue only treats <template> as a transparent grouping construct when it
+     carries v-if/v-for/v-slot; without one it compiles to a literal HTML
+     <template> element, and browsers never render a <template>'s content —
+     that's the one thing the tag is for. Every card, link and line of text
+     was genuinely present in the DOM the whole time, just permanently
+     inert, which is why it never threw an error on any device or browser
+     — confirmed 2026-09-13 with a headless-browser screenshot after the
+     bug survived a week of remote debugging by request-level testing
+     alone (curl and API replay can't see this class of bug at all). -->
 
 <style scoped>
 .searchbar {

@@ -1,9 +1,11 @@
 import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
+import { installGlobalErrorHandlers } from './globalError'
 import './style.css'
 
 const app = createApp(App)
+installGlobalErrorHandlers(app)
 app.use(router)
 app.mount('#app')
 

@@ -18,6 +18,10 @@ const llm = ref<{ configured: boolean; provider: string } | null>(null)
 const error = ref('')
 const notice = ref('')
 const editing = ref(false)
+// Nothing renders until `item` is set (below), so a slow fetch — real
+// latency over the public tunnel, not a bug — otherwise looks identical to
+// a broken click: same blank screen either way, no way to tell them apart.
+const loading = ref(true)
 const draft = ref({ title: '', content: '', project_id: '' as number | '', tags: '' })
 const busy = ref('')
 
@@ -40,6 +44,7 @@ async function verdict(v: 'approve' | 'dismiss') {
 }
 
 async function load() {
+  loading.value = true
   try {
     item.value = await getKnowledge(Number(props.id))
     recordVisit(item.value.id, item.value.title)
@@ -49,6 +54,8 @@ async function load() {
     error.value = ''
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    loading.value = false
   }
 }
 
@@ -152,6 +159,7 @@ async function remove() {
 </script>
 
 <template>
+  <p v-if="loading && !item" class="empty">加载中…</p>
   <div v-if="error && !item" class="error-bar">{{ error }}</div>
   <div v-if="item">
     <div class="card">
