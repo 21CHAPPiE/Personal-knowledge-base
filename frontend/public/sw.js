@@ -1,9 +1,15 @@
 /* Minimal app-shell service worker for the Personal Knowledge Base PWA.
- * - Same-origin static assets: cache-first (offline shell works).
+ * - Same-origin static assets: stale-while-revalidate (offline shell works,
+ *   and a code change becomes visible after one reload instead of being
+ *   cached forever — pure cache-first here meant a phone that had ever
+ *   opened the app was stuck on whatever JS existed on its first visit
+ *   until someone remembered to bump CACHE_VERSION by hand; confirmed on
+ *   2026-09-12 as the cause of an iPad showing pre-fix Dashboard behavior).
  * - /api and /uploads: network-first with cache fallback, short-lived.
- * Bump CACHE_VERSION to invalidate old caches.
+ * Bump CACHE_VERSION to force an immediate purge instead of waiting for the
+ * background revalidation to catch up.
  */
-const CACHE_VERSION = 'kb-v1';
+const CACHE_VERSION = 'kb-v2';
 const STATIC_CACHE = `kb-static-${CACHE_VERSION}`;
 const DATA_CACHE = `kb-data-${CACHE_VERSION}`;
 const MAX_DATA_ENTRIES = 60;
@@ -55,16 +61,18 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request).then(
-      (hit) =>
-        hit ||
-        fetch(event.request).then((res) => {
-          if (res.ok) {
-            const clone = res.clone();
-            caches.open(STATIC_CACHE).then((cache) => cache.put(event.request, clone));
-          }
-          return res;
-        })
-    )
+    caches.match(event.request).then((hit) => {
+      const network = fetch(event.request).then((res) => {
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(STATIC_CACHE).then((cache) => cache.put(event.request, clone));
+        }
+        return res;
+      }).catch(() => null);
+      // Serve the cached copy immediately when there is one (instant, works
+      // offline), but always let the network fetch land in the cache too —
+      // this load is one version behind at worst, not stuck forever.
+      return hit || network;
+    })
   );
 });
