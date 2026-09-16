@@ -46,10 +46,19 @@ class QwenProvider(LLMProvider):
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
+            # MiMo's official API reads max_completion_tokens instead of
+            # max_tokens; sending both keeps this working across whichever
+            # backend QWEN_BASE_URL currently points at.
+            "max_completion_tokens": max_tokens,
             "temperature": temperature,
         }
         if not enable_thinking:
+            # chat_template_kwargs.enable_thinking is the vLLM/llama.cpp
+            # extension (local Qwen3); thinking.type is MiMo's official API
+            # shape. Sending both is harmless on either since unknown fields
+            # are ignored.
             payload["chat_template_kwargs"] = {"enable_thinking": False}
+            payload["thinking"] = {"type": "disabled"}
         try:
             resp = httpx.post(url, json=payload, headers=self._headers(), timeout=self.timeout)
         except httpx.HTTPError as exc:
@@ -74,7 +83,11 @@ class QwenProvider(LLMProvider):
             "用中文把下面这条个人知识压缩成 1-2 句摘要，"
             "只输出摘要本身，不要解释。\n\n" + body
         )
-        return self.chat(prompt, max_tokens=self.LLM_MAX_TOKENS)
+        # A 1-2 sentence summary doesn't need reasoning; on MiMo's official
+        # API, leaving thinking at its default-enabled setting burns the
+        # whole LLM_MAX_TOKENS budget on reasoning_content and returns an
+        # empty content with finish_reason="length" (confirmed 2026-09-11).
+        return self.chat(prompt, max_tokens=self.LLM_MAX_TOKENS, enable_thinking=False)
 
     def suggest_tags(self, title: str, content: str) -> List[str]:
         body = f"标题: {title}\n内容: {content}"[:6000]
@@ -82,7 +95,7 @@ class QwenProvider(LLMProvider):
             "为下面这条个人知识推荐 3-5 个简短标签（中文或英文，每个不超过 12 字符）。"
             '严格输出 JSON 数组，例如 ["a","b"]，不要其他文字。\n\n' + body
         )
-        raw = self.chat(prompt, max_tokens=self.LLM_MAX_TOKENS)
+        raw = self.chat(prompt, max_tokens=self.LLM_MAX_TOKENS, enable_thinking=False)
         return self._parse_tags(raw)
 
     def synthesize_rubric(self, decisions: List[dict]) -> str:
