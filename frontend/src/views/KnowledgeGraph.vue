@@ -503,7 +503,15 @@ function render() {
       ctx.fillStyle = ADVERSARIAL.test(l.kind) ? '#fca5a5' : '#cbd5e1'
       ctx.fillText(l.kind, x, y)
     })
-    .onNodeClick((n) => focus(selected.value?.id === n.id ? null : n))
+    // First tap on a node focuses it (highlights its edges, opens the side
+    // panel) without leaving the graph. A second tap on that same
+    // already-focused node is the reader saying "no really, open it" — that
+    // one navigates to the full item. Tapping empty background is the way
+    // back out, at either stage.
+    .onNodeClick((n) => {
+      if (selected.value?.id === n.id) router.push({ name: n.routeName, params: { id: n.routeId } })
+      else focus(n)
+    })
     .onBackgroundClick(() => focus(null))
     .width(container.value.clientWidth)
     .height(container.value.clientHeight || 560)
@@ -576,7 +584,9 @@ onBeforeUnmount(() => graph?._destructor())
       </label>
 
       <span class="counts">
-        {{ stats.nodes }} 节点 / {{ stats.links }} 连线<template v-if="relations.length"> · {{ relations.length }} 条具名关系</template>
+        {{ stats.nodes }} 节点 / {{ stats.links }} 连线<template
+          v-if="mode === 'people' && relations.length"> · {{ relations.length }} 条具名关系</template><template
+          v-else-if="mode === 'events' && causal.length"> · {{ causal.length }} 条因果关系</template>
       </span>
     </div>
 
