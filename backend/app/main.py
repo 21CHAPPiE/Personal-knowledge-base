@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import (attachments, audit as audit_api, knowledge, lessons, llm,
-                     projects, proposals, search, stats)
+                     projects, proposals, search, skill, stats)
 from app.audit import AuditMiddleware
 from app.config import get_settings
 from app.db.database import get_connection, init_db
@@ -39,11 +39,15 @@ def create_app() -> FastAPI:
     # MVP shared-secret auth: no-op when KB_API_TOKEN is unset (local/dev
     # default), so it never breaks the "usable without config" contract.
     # /health stays open for uptime checks; CORS preflight is never a real
-    # request so it must pass through untouched.
+    # request so it must pass through untouched. The two install-script
+    # endpoints are also open — they're what a brand-new machine fetches
+    # before it has a token to send at all (see app/api/skill.py).
+    OPEN_PATHS = ("/health", "/api/skill/install.sh", "/api/skill/install.ps1")
+
     @app.middleware("http")
     async def require_api_token(request: Request, call_next):
         settings = get_settings()
-        if settings.api_token and request.method != "OPTIONS" and request.url.path != "/health":
+        if settings.api_token and request.method != "OPTIONS" and request.url.path not in OPEN_PATHS:
             expected = f"Bearer {settings.api_token}"
             provided = request.headers.get("authorization", "")
             if not hmac.compare_digest(provided, expected):
@@ -64,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(llm.router)
     app.include_router(stats.router)
     app.include_router(audit_api.router)
+    app.include_router(skill.router)
 
     app.mount("/uploads", StaticFiles(directory=str(settings.uploads_dir), check_dir=False), name="uploads")
 

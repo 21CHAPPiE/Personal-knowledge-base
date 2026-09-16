@@ -30,8 +30,9 @@ data/access.jsonl*
 .env.*.local
 
 # --- 本地配置 / 临时文件 ---
-.claude/settings.local.json
+.claude/
 start_result.txt
 *.log
 .DS_Store
 Thumbs.db
+scratchpad/
